@@ -247,9 +247,9 @@
           <button class="btn" id="zoneForget" style="padding:5px 9px;font-size:10px;margin-left:auto">🗑 Dimentica</button>
         </div>
         <p class="hint" id="zoneMeta"></p>
-        <div class="wp-list" id="zoneList" style="max-height:180px"><div class="empty">Scarica da D-Flight (profilo → <b>Download UAS Geo Zone</b>) e carica qui il file: accetta direttamente il <b>.json.gz</b> (o il .json/.zip).<br>Le zone vicine alla Home verranno mostrate e i waypoint controllati.</div></div>
+        <div class="wp-list" id="zoneList" style="max-height:180px"><div class="empty">Scaricabile da d-flight solo dagli <b>Operatori BASE/PRO con abbonamento attivo</b> (profilo → <b>Download UAS GeoZone</b>; API M2M su richiesta). Carica qui il <b>.json.gz</b> (o .json/.zip).<br>Le zone vicine alla Home verranno mostrate e i waypoint controllati.</div></div>
         <p class="hint" id="zoneConflict"></p>
-        <p class="hint">Dati a solo scopo informativo. La fonte ufficiale resta <b>d-flight.it</b>: verifica sempre lì prima del volo.</p>
+        <p class="hint">Dati a solo scopo informativo. La piattaforma ufficiale resta <b>d-flight.it</b>; riferimenti normativi: <b>ENAC (enac.gov.it)</b> e <b>AIP Italia (sez. ENR 5.1, da verificare)</b>. Verifica sempre lì prima del volo.</p>
       </div>
     </div>
 
@@ -362,7 +362,7 @@
       <p style="line-height:1.6;font-size:13px">AeroPlan è uno strumento di <b>pianificazione e simulazione</b> di voli con drone, realizzato a scopo didattico e di supporto. <b>Non è una fonte ufficiale</b> e non sostituisce gli enti competenti.</p>
       <p style="line-height:1.6;font-size:13px;margin-top:10px">Prima di accedere, prendi atto che:</p>
       <ul style="line-height:1.7;font-size:12px;color:var(--dim);margin:8px 0 0 18px">
-        <li>La fonte ufficiale per le zone e i permessi di volo in Italia è <b>d-flight.it</b> (ENAC/ENAV): <b>verifica sempre lì</b> prima di ogni volo.</li>
+        <li>La piattaforma ufficiale per le zone e i permessi di volo in Italia è <b>d-flight.it</b> (ENAC/ENAV); riferimenti normativi: <b>ENAC (www.enac.gov.it)</b> e <b>AIP Italia (sez. ENR 5.1, da verificare su fonte ufficiale)</b>: <b>verifica sempre lì</b> prima di ogni volo.</li>
         <li>Le zone UAS importate (ED-269) possono essere <b>non aggiornate</b> (cambiano a ogni ciclo AIRAC, ~28 giorni). Controlla la data del dato.</li>
         <li>Il controllo dei waypoint è un <b>ausilio</b>, planimetrico e non esaustivo: non garantisce la conformità del volo.</li>
         <li>L'export WPML è supportato <b>solo dai droni DJI Enterprise</b>; verifica la missione in DJI Pilot 2 prima del volo.</li>
@@ -1156,7 +1156,7 @@ function focusZone(z){
 function renderZoneList(){
   $('zoneCount').textContent=dfZones.length;
   const L=$('zoneList');
-  if(!dfZones.length){L.innerHTML='<div class="empty">'+(allZones.length?('Nessuna zona entro '+(ZONE_MAXDIST/1000)+' km da questa Home. Aumenta il raggio o sposta la Home.'):'Carica il file ED-269 da D-Flight per vedere le zone.')+'</div>';return;}
+  if(!dfZones.length){L.innerHTML='<div class="empty">'+(allZones.length?('Nessuna zona entro '+(ZONE_MAXDIST/1000)+' km da questa Home. Aumenta il raggio o sposta la Home.'):'Carica il file ED-269 (scaricabile da d-flight solo da Operatori BASE/PRO con abbonamento attivo).')+'</div>';return;}
   L.innerHTML='';
   dfZones.slice(0,150).forEach(z=>{
     const ri=restrInfo(z.restriction), pcol='#'+ri.color.toString(16).padStart(6,'0'), acol='#'+(z.color>>>0).toString(16).padStart(6,'0');
