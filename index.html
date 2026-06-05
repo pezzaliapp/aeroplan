@@ -232,11 +232,11 @@
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:4px">
           <span style="color:var(--faint)">QUOTA MAX AGL:</span>
-          <span><span style="color:#ff5a6a">●</span> 0</span>
-          <span><span style="color:#ff9d2e">●</span> 25</span>
-          <span><span style="color:#ffd23e">●</span> 45</span>
-          <span><span style="color:#39d6e0">●</span> 60</span>
-          <span><span style="color:#cdd9e5">●</span> 120 m</span>
+          <span><span style="color:#ff3b30">●</span> 0</span>
+          <span><span style="color:#ff9500">●</span> 25</span>
+          <span><span style="color:#ffd60a">●</span> 45</span>
+          <span><span style="color:#5ac8fa">●</span> 60</span>
+          <span><span style="color:#e8eef5">●</span> 120 m</span>
         </div>
         <div style="font-family:var(--mono);font-size:10px;color:var(--faint);margin-bottom:8px">Il colore = quota massima (come d-flight). Il <b style="color:var(--dim)">testo</b> = permesso (vietato / autorizzazione).</div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -986,7 +986,7 @@ function restrRank(r){const w=restrInfo(r).word; return (w==='VIETATO'||w==='PER
 // B5 — colore della zona: VIETATO/PERICOLO sempre rosso; quota ignota = neutro; altrimenti per quota max (in metri)
 function zoneFillColor(restriction,upperM){
   const ri=restrInfo(restriction);
-  if(ri.word==='VIETATO'||ri.word==='PERICOLO')return 0xff5a6a;
+  if(ri.word==='VIETATO'||ri.word==='PERICOLO')return 0xff3b30;   // interdette/pericolo: rosso forzato
   if(upperM==null)return 0x8a99ad;   // quota non indicata ⇒ neutro (non "120 m bianco" ottimistico)
   return altColor(upperM);
 }
@@ -1049,11 +1049,11 @@ function updateVerdict(homeZone,homeUpper,nViet,nAuth,nOther){
 }
 // colore per QUOTA MASSIMA AGL come la legenda ufficiale d-flight
 function altColor(u){ u=(u==null?120:u);
-  if(u<=0)return 0xff5a6a;      // 0 m
-  if(u<=25)return 0xff9d2e;     // 25 m
-  if(u<=45)return 0xffd23e;     // 45 m
-  if(u<=60)return 0x39d6e0;     // 60 m
-  return 0xcdd9e5;              // 120 m / standard
+  if(u<=0)return 0xff3b30;      // 0 m
+  if(u<=25)return 0xff9500;     // 25 m
+  if(u<=45)return 0xffd60a;     // 45 m
+  if(u<=60)return 0x5ac8fa;     // 60 m
+  return 0xe8eef5;              // 120 m / standard (bianco/grigio chiaro)
 }
 $('zoneOpenDflight').onclick=()=>window.open('https://www.d-flight.it/web-app/','_blank');
 $('zoneImportBtn').onclick=()=>$('zoneFile').click();
@@ -1134,6 +1134,9 @@ function asPolys(geom){
   else if(Array.isArray(hp.coordinates)&&Array.isArray(hp.coordinates[0])&&Array.isArray(hp.coordinates[0][0])){ pushPoly(out,hp.coordinates); }
   return out.filter(p=>p.outer&&p.outer.length>2);
 }
+// lettura robusta di campi numerici/stringa con nomi alternativi (parseFloat gestisce "120 m", "0 AGL", …)
+function firstNum(obj,keys){ if(!obj)return null; for(const k of keys){ let v=obj[k]; if(v==null||v==='')continue; v=parseFloat(v); if(isFinite(v))return v; } return null; }
+function firstStr(obj,keys){ if(!obj)return null; for(const k of keys){ const v=obj[k]; if(v!=null&&v!=='')return String(v); } return null; }
 function parseED269(data){
   // capture version date from title e.g. "ITA ZoneVersion 05/06/2026 15:59:50"
   zoneMeta={versionStr:null,versionDate:null,savedAt:zoneMeta.savedAt};
@@ -1150,16 +1153,22 @@ function parseED269(data){
     let geoms=f.geometry||props.geometry||f.geometries||[];
     if(geoms&&!Array.isArray(geoms))geoms=[geoms];
     if((!geoms||!geoms.length)&&f.type==='Feature'&&f.geometry)geoms=[f.geometry];
-    let polys=[],lower=0,upper=null,uom='m',datum=null;
+    let polys=[],lower=null,upper=null,uom=null,datum=null;
     for(const g of geoms){
       const ps=asPolys(g); if(!ps.length)continue;
       polys=polys.concat(ps);
-      if(g.lowerLimit!=null)lower=+g.lowerLimit;
-      if(g.upperLimit!=null)upper=+g.upperLimit;
-      if(g.uomDimensions||g.uom)uom=(g.uomDimensions||g.uom);
-      if(g.upperVerticalReference)datum=g.upperVerticalReference;   // B5 — AGL/AMSL/WGS84
+      // formato ED-269 nativo: i limiti stanno nel volume (g)
+      if(lower==null)lower=firstNum(g,['lowerLimit','lowerAltitude','lower','minAltitude','altitudeLower']);
+      if(upper==null)upper=firstNum(g,['upperLimit','upperAltitude','upper','maxAltitude','altitudeUpper']);
+      if(uom==null)uom=firstStr(g,['uomDimensions','uom','unit','altitudeUnit','uomUpper']);
+      if(datum==null)datum=firstStr(g,['upperVerticalReference','verticalReferenceUpper','upperReference']);
     }
-    datum=datum||props.upperVerticalReference||null;
+    // formato d-flight GeoJSON: i limiti stanno nelle properties (la geometry è un GeoJSON puro)
+    if(upper==null)upper=firstNum(props,['upperLimit','upperAltitude','upper','maxAltitude','altitudeUpper','altitudeMax','upperAltitudeValue','heightUpper','maxHeight','vMax']);
+    if(lower==null)lower=firstNum(props,['lowerLimit','lowerAltitude','lower','minAltitude','altitudeLower','altitudeMin','lowerAltitudeValue','heightLower','minHeight','vMin']);
+    if(uom==null)uom=firstStr(props,['uomDimensions','uom','unit','altitudeUnit','uomUpper','upperAltitudeUnit','altitudeUnitUpper']);
+    if(datum==null)datum=firstStr(props,['upperVerticalReference','verticalReferenceUpper','upperReference','upperAltitudeReference']);
+    lower=lower==null?0:lower; uom=uom||'m';
     // B5 — quota max in metri per il colore (gestisce uom 'ft')
     const upM=upper==null?null:(/ft|feet/.test((uom||'').toString().toLowerCase())?upper*0.3048:upper);
     if(!polys.length)continue;
@@ -1226,7 +1235,7 @@ function buildZones(){
     const active=isZoneActiveNow(z);
     const danger=!!restrInfo(z.restriction).danger;
     const bcol=sel?0xffffff:(active?z.color:0x5a6678);          // non attiva ⇒ grigia
-    const fillOp=active?(sel?0.22:0.16):0.06;
+    const fillOp=active?(sel?0.42:0.32):0.14;   // opacità più alta: aree ben visibili su satellite e mappa
     const dashed=(z.dynamic||danger||!active);
     z.polys.forEach(poly=>{
       const outer=cleanRing(poly.outer); if(outer.length<3)return;
@@ -1240,7 +1249,7 @@ function buildZones(){
       // BORDI — anello esterno + buchi, sopra il fill
       [outer,...holes].forEach(ring=>{
         const pts=ring.map(p=>new THREE.Vector3(p.x,0.10,p.z)); pts.push(pts[0].clone());
-        const lmat=dashed?new THREE.LineDashedMaterial({color:bcol,dashSize:8,gapSize:5,depthWrite:false}):new THREE.LineBasicMaterial({color:bcol,depthWrite:false});
+        const lmat=dashed?new THREE.LineDashedMaterial({color:bcol,dashSize:8,gapSize:5,depthWrite:false,linewidth:2}):new THREE.LineBasicMaterial({color:bcol,depthWrite:false,linewidth:2});
         const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),lmat); if(lmat.isLineDashedMaterial)line.computeLineDistances(); line.renderOrder=2; zoneGroup.add(line);
       });
     });
