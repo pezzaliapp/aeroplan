@@ -862,10 +862,46 @@ const skyBg=scene.background;                  // cielo procedurale (gradient) d
 let lodTimer=null, loadGen=0;
 let lastLoadedZ=null, loadedCenter={x:0,z:0}, loadedWorld=2400;
 
+let maxTileZ=19, mzDetectAt=null;   // livello tile massimo con dato reale Esri (rilevato per la zona; default conservativo)
 function desiredTileZ(extent){
   const latRad=home.lat*Math.PI/180;
   const z=Math.round(Math.log2(SPAN_TILES*256*156543.03392*Math.cos(latRad)/clamp(extent,900,180000)));
-  return clamp(z,9,20);
+  return clamp(z,9,maxTileZ);
+}
+// distanza camera minima per cui i tile al livello z restano nativi (a fuoco) alla latitudine della Home
+function minDistForZ(z){
+  const res=156543.03392*Math.cos(home.lat*Math.PI/180)/Math.pow(2,z);
+  return Math.max(50, SPAN_TILES*256*res*0.75);
+}
+/* Rileva fino a che zoom-tile Esri ha DAVVERO dettaglio attorno alla Home, sondando il tilemap dello
+   stesso servizio World_Imagery (nessun servizio nuovo). Dove il tile non è in cache → niente dato reale
+   a quel livello: ci si fermerebbe a stirare la texture. Così taro minDist sul livello reale, non su z20 fisso. */
+async function detectMaxZ(lat,lon){
+  const tileUrl=z=>{const n=2**z,latRad=lat*Math.PI/180;
+    const x=Math.floor((lon+180)/360*n), y=Math.floor((1-Math.asinh(Math.tan(latRad))/Math.PI)/2*n);
+    return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tilemap/${z}/${y}/${x}/2/2`;};
+  for(let z=20;z>=16;z--){
+    try{
+      const r=await fetch(tileUrl(z)); if(!r.ok)continue;
+      const j=await r.json(); const d=j&&j.data;
+      if(Array.isArray(d)&&d.reduce((a,b)=>a+(b?1:0),0)>=2) return z;   // ≥2/4 tile presenti ⇒ livello con dato reale
+    }catch(e){ return null; }   // rete/CORS non disponibili: nessun rilevamento
+  }
+  return 16;
+}
+function applyMaxZ(z){
+  if(z==null)return;                  // rilevamento fallito: mantieni il default
+  maxTileZ=clamp(z,12,20);
+  orbit.minDist=minDistForZ(maxTileZ);
+  orbit.dist=clamp(orbit.dist,orbit.minDist,orbit.maxDist||2500); syncZoom();
+  if(currentBase!=='proc'&&satPlane) scheduleLOD();   // ricarica al cap corretto se i tile attuali erano oltre il dato reale
+}
+async function detectAndApplyMaxZ(){
+  if(currentBase==='proc')return;
+  const key=Math.round(home.lat*100)/100+','+Math.round(home.lon*100)/100;
+  if(mzDetectAt===key)return;         // già rilevato per quest'area (~1 km)
+  mzDetectAt=key;
+  try{ applyMaxZ(await detectMaxZ(home.lat,home.lon)); }catch(e){}
 }
 // su zoom/pan: se serve più dettaglio (o ci si è spostati) ricarica i tile mantenendo la vista
 function scheduleLOD(){
@@ -918,7 +954,7 @@ async function loadBasemap(kind,extentOverride,frameCloseOn,keepView,centerLocal
     const latRad=cgeo.lat*Math.PI/180;
     const targetExtent=clamp(extentOverride||ZONE_MAXDIST*1.6,900,180000);
     let z=Math.round(Math.log2((2*k+1)*256*156543.03392*Math.cos(latRad)/targetExtent));
-    z=clamp(z,9,20); const nT=2**z;
+    z=clamp(z,9,maxTileZ); const nT=2**z;   // mai oltre il livello reale Esri (niente tile upsampled/sfocati)
     const fx=(cgeo.lon+180)/360*nT, fy=(1-Math.asinh(Math.tan(latRad))/Math.PI)/2*nT;
     const xc=Math.floor(fx),yc=Math.floor(fy);
     const res=156543.03392*Math.cos(latRad)/nT;
@@ -941,8 +977,7 @@ async function loadBasemap(kind,extentOverride,frameCloseOn,keepView,centerLocal
     lastLoadedZ=z; loadedCenter={x:ctr.x,z:ctr.z}; loadedWorld=worldSize;
     // NITIDEZZA: limita lo zoom-in al punto in cui i tile restano nativi (z max=20). Oltre, non c'è
     // dettaglio Esri: fermare la camera lì evita di stirare la texture creando l'effetto "sciolto".
-    const res20=156543.03392*Math.cos(home.lat*Math.PI/180)/1048576; // m/px allo zoom-tile 20 (max Esri)
-    orbit.minDist=Math.max(50, SPAN_TILES*256*res20*0.75);   // ~1:1 texel↔pixel a z20 ⇒ immagine a fuoco, niente upscaling visibile
+    orbit.minDist=minDistForZ(maxTileZ);   // limite di zoom-in tarato sul livello tile reale ⇒ sempre a fuoco
     if(!keepView){
       WORLD.size=worldSize;
       const far=Math.max(8000,worldSize*3);
@@ -959,7 +994,7 @@ async function loadBasemap(kind,extentOverride,frameCloseOn,keepView,centerLocal
     $('attrib').textContent=B.attr;$('attrib').style.display='block';
     currentBase=kind; markBase();
     relocalizeZones();
-    if(!keepView)toast((kind==='sat'?'Satellite':'Mappa')+' caricata ('+ok+'/'+((2*k+1)*(2*k+1))+' tile)');
+    if(!keepView){ toast((kind==='sat'?'Satellite':'Mappa')+' caricata ('+ok+'/'+((2*k+1)*(2*k+1))+' tile)'); detectAndApplyMaxZ(); }   // rileva il livello tile reale per la zona
   }catch(err){
     if(gen===loadGen){ if(!keepView)toast((kind==='sat'?'Satellite':'Mappa')+' non disponibile — '+err.message); markBase(); }
   }
