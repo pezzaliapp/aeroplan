@@ -72,6 +72,7 @@
   .wp.poi-wp .num{background:var(--violet)!important;color:#16102e!important}
   .wp.survey-wp .num{background:var(--green)!important;color:#08210f!important}
   .wp.corridor-wp .num{background:#ffb86b!important;color:#2a1606!important}
+  .wp.zoneconflict{border-color:var(--red)}
   .wp .h{display:flex;justify-content:space-between;align-items:center}
   .wp .idx{display:flex;align-items:center;gap:8px;font-weight:700;font-size:12px}
   .wp .idx .num{width:20px;height:20px;border-radius:50%;background:var(--amber);color:#1a1206;display:grid;place-items:center;font-size:11px}
@@ -198,6 +199,24 @@
           <button class="btn" id="satBtn" style="justify-content:center">🛰 Satellite</button>
         </div>
         <p class="hint" id="satHint">Usa "Mia posizione" per centrare la Home sul GPS del dispositivo (richiede HTTPS e permesso). I tile satellitari (Esri) vengono caricati attorno alla Home.</p>
+      </div>
+    </div>
+
+    <!-- DFLIGHT ZONES -->
+    <div class="sect">
+      <h2>Zone UAS · D-Flight <b style="margin-left:auto;color:var(--cyan);font-family:var(--mono)" id="zoneCount">0</b></h2>
+      <div class="body">
+        <div class="row2" style="margin-bottom:8px">
+          <button class="btn" id="zoneImportBtn" style="justify-content:center">🛡 Carica ED-269</button>
+          <button class="btn" id="zoneOpenDflight" style="justify-content:center">↗ D-Flight</button>
+        </div>
+        <input type="file" id="zoneFile" accept=".json,.zip" style="display:none">
+        <label class="field" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px">
+          <input type="checkbox" id="zoneToggle" checked style="width:auto"> <span style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">Mostra zone sulla mappa</span>
+        </label>
+        <div class="wp-list" id="zoneList" style="max-height:180px"><div class="empty">Scarica il file <b>ED-269</b> dal tuo profilo D-Flight ("Download UAS Zone Geo") e caricalo qui.<br>Le zone vicine alla Home verranno mostrate e i waypoint controllati.</div></div>
+        <p class="hint" id="zoneConflict"></p>
+        <p class="hint">Dati a solo scopo informativo. La fonte ufficiale resta <b>d-flight.it</b>: verifica sempre lì prima del volo.</p>
       </div>
     </div>
 
@@ -527,8 +546,9 @@ function syncSliders(){
 function renderDjiModels(){const s=$('djiModel');s.innerHTML='';DJI_MODELS.forEach(m=>{const o=document.createElement('option');o.value=m.id;o.textContent=m.nm;s.appendChild(o);});s.value=cfg.dji;s.onchange=e=>{cfg.dji=e.target.value;updateWpmlDesc();};}
 function updateWpmlDesc(){const m=DJI_MODELS.find(x=>x.id===cfg.dji);$('wpmlDesc').innerHTML=`<b>${m.nm}</b> · drone ${m.drone}/${m.sub} · payload ${m.payload} (${m.pname}). KMZ conforme per DJI Pilot 2.`;}
 ['homeLat','homeLon','homeAlt'].forEach(k=>{const key=k.replace('home','').toLowerCase();$(k).addEventListener('input',e=>home[key]=+e.target.value);});
+$('homeLat').addEventListener('change',relocalizeZones);$('homeLon').addEventListener('change',relocalizeZones);
 const CITIES={'milano':[45.4642,9.1913],'roma':[41.9028,12.4964],'napoli':[40.8518,14.2681],'torino':[45.0703,7.6869],'firenze':[43.7696,11.2558],'venezia':[45.4408,12.3155],'bologna':[44.4949,11.3426],'palermo':[38.1157,13.3615],'bari':[41.1171,16.8719],'parigi':[48.8566,2.3522],'londra':[51.5074,-0.1278],'new york':[40.7128,-74.006],'tokyo':[35.6762,139.6503]};
-$('geoSearch').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const q=e.target.value.trim().toLowerCase();if(CITIES[q]){home.lat=CITIES[q][0];home.lon=CITIES[q][1];$('homeLat').value=home.lat;$('homeLon').value=home.lon;toast('Home → '+e.target.value);}else toast('Città non in elenco');});
+$('geoSearch').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const q=e.target.value.trim().toLowerCase();if(CITIES[q]){home.lat=CITIES[q][0];home.lon=CITIES[q][1];$('homeLat').value=home.lat;$('homeLon').value=home.lon;relocalizeZones();toast('Home → '+e.target.value);}else toast('Città non in elenco');});
 
 /* tool buttons */
 document.querySelectorAll('.toolbtn').forEach(b=>b.onclick=()=>{tool=b.dataset.tool;document.querySelectorAll('.toolbtn').forEach(x=>x.classList.toggle('sel',x===b));const tm=$('toolmode');if(tool==='poi'){tm.style.display='block';tm.textContent='🎯 Clicca per posizionare il POI';}else if(tool==='corridor'){tm.style.display='block';tm.textContent='🛣 Clicca per tracciare il percorso del corridoio';}else{tm.style.display='none';}});
@@ -622,15 +642,16 @@ $('corrGen').onclick=()=>{
 
 function renderWpList(){
   const L=$('wpList');$('wpCount').textContent=waypoints.length+' WP';
+  checkZones();
   if(!waypoints.length){L.innerHTML='<div class="empty">Strumento <b>Waypoint</b>: clicca sul terreno 3D.<br>Strumento <b>POI</b>: clicca, poi genera un\'orbita.<br><br>Trascina = ruota · rotella = zoom.</div>';$('missionStats').textContent='';return;}
   L.innerHTML='';
   waypoints.forEach((w,i)=>{
     const g=toGPS(w.x,w.z), tagcls=w.kind==='orbit'?' poi-wp':w.kind==='survey'?' survey-wp':w.kind==='corridor'?' corridor-wp':'';
     const kindlbl=w.kind==='orbit'?'Orbita':w.kind==='survey'?'Mappa':w.kind==='corridor'?'Corridoio':'Waypoint';
-    const el=document.createElement('div');el.className='wp'+(i===selected?' sel':'')+tagcls;
+    const el=document.createElement('div');el.className='wp'+(i===selected?' sel':'')+tagcls+(w._zone?' zoneconflict':'');
     el.innerHTML=`<div class="h"><div class="idx"><span class="num">${i+1}</span> ${kindlbl}</div><span class="x" data-del="${i}">✕</span></div>
       <div class="meta"><span>⛰ ${w.alt}m</span><span>➤ ${w.speed}m/s</span><span>↻ ${w.head}°</span><span>📷 ${w.gimbal}° ${w.action}</span></div>
-      <div class="meta"><span style="color:var(--faint)">${g.lat.toFixed(6)}, ${g.lon.toFixed(6)}${w.headingMode==='towardPOI'?' · POI-lock':''}</span></div>
+      <div class="meta"><span style="color:var(--faint)">${g.lat.toFixed(6)}, ${g.lon.toFixed(6)}${w.headingMode==='towardPOI'?' · POI-lock':''}</span>${w._zone?`<span style="color:var(--red)">⚠ ${w._zone.name}</span>`:''}</div>
       <div class="wp-edit">
         <div class="row2"><div class="field"><label>Quota <b>${w.alt}m</b></label><input type="range" min="5" max="${cfg.aMax}" value="${w.alt}" data-f="alt" data-i="${i}"></div>
           <div class="field"><label>Velocità <b>${w.speed}</b></label><input type="range" min="1" max="${cfg.vMax}" value="${w.speed}" data-f="speed" data-i="${i}"></div></div>
@@ -673,6 +694,7 @@ $('geoBtn').onclick=()=>{
     $('homeLat').value=home.lat;$('homeLon').value=home.lon;
     b.textContent='📍 Mia posizione';b.disabled=false;
     toast('Posizione acquisita (±'+Math.round(pos.coords.accuracy)+'m) — carico satellite');
+    relocalizeZones();
     loadSatellite();
   },err=>{ b.textContent='📍 Mia posizione';b.disabled=false; toast('Posizione non disponibile: '+err.message); },
   {enableHighAccuracy:true,timeout:12000,maximumAge:60000});
@@ -717,6 +739,127 @@ async function loadSatellite(){
     $('satBtn').textContent='🛰 Satellite';
   }
   $('satBtn').disabled=false;
+}
+
+/* ===================== D-FLIGHT ED-269 ZONES ===================== */
+const zoneGroup=new THREE.Group(); scene.add(zoneGroup);
+let dfZones=[];                 // normalized {name,restriction,color,lower,upper,uom,polys:[[{x,z}]]}
+const ZONE_MAXDIST=15000, ZONE_CAP=400;
+function restrColor(r){r=(r||'').toUpperCase();
+  if(/PROHIB|NO_FLY|NOFLY|FORBID/.test(r))return 0xff5a6a;
+  if(/AUTHOR|AUTORIZ|REQ/.test(r))return 0xff9d2e;
+  if(/CONDITION|RESTRICT|LIMIT/.test(r))return 0x9d8cff;
+  return 0x39d6e0;
+}
+$('zoneOpenDflight').onclick=()=>window.open('https://www.d-flight.it/web-app/','_blank');
+$('zoneImportBtn').onclick=()=>$('zoneFile').click();
+$('zoneFile').addEventListener('change',e=>{const f=e.target.files[0];if(f)loadZoneFile(f);e.target.value='';});
+$('zoneToggle').addEventListener('change',e=>{zoneGroup.visible=e.target.checked;});
+async function loadZoneFile(file){
+  $('zoneImportBtn').textContent='⏳ …';$('zoneImportBtn').disabled=true;
+  try{
+    let text;
+    if(file.name.toLowerCase().endsWith('.zip')){
+      const zip=await JSZip.loadAsync(await file.arrayBuffer());let entry=null;
+      zip.forEach((p,o)=>{if(p.toLowerCase().endsWith('.json'))entry=o;});
+      if(!entry)throw new Error('nessun JSON nello zip');text=await entry.async('string');
+    } else text=await file.text();
+    parseED269(JSON.parse(text));
+    buildZones(); checkZones(); renderWpList();
+    toast(dfZones.length+' zone caricate (vicine alla Home)');
+  }catch(err){toast('Zone: '+err.message);}
+  $('zoneImportBtn').textContent='🛡 Carica ED-269';$('zoneImportBtn').disabled=false;
+}
+function asPolys(geom){
+  // returns array of polygons, each an array of [lon,lat]
+  const out=[];
+  const hp=geom.horizontalProjection||geom.geometry||geom;
+  const type=(hp.type||'').toLowerCase();
+  if(type==='circle'||hp.radius!=null){
+    const c=hp.center||hp.coordinates||[hp.lon,hp.lat]; const lon=c[0],lat=c[1];
+    const rad=+(hp.radius||hp.radiusM||0); const ring=[];
+    const mLat=111320, mLon=111320*Math.cos(lat*Math.PI/180);
+    for(let i=0;i<=32;i++){const a=i/32*2*Math.PI;ring.push([lon+(rad*Math.cos(a))/mLon,lat+(rad*Math.sin(a))/mLat]);}
+    out.push(ring);
+  } else if(type==='polygon'){ out.push(hp.coordinates[0]); }
+  else if(type==='multipolygon'){ hp.coordinates.forEach(p=>out.push(p[0])); }
+  else if(Array.isArray(hp.coordinates)&&Array.isArray(hp.coordinates[0])&&Array.isArray(hp.coordinates[0][0])){ out.push(hp.coordinates[0]); }
+  return out.filter(r=>r&&r.length>2);
+}
+function parseED269(data){
+  let arr=Array.isArray(data)?data:(data.features||data.zones||data.UASZoneVersion||data.uasZoneVersion||[]);
+  if(!Array.isArray(arr))arr=[];
+  const cosLat=Math.cos(home.lat*Math.PI/180);
+  const near=(lon,lat)=>{const dN=(lat-home.lat)*111320,dE=(lon-home.lon)*111320*cosLat;return Math.hypot(dN,dE)<=ZONE_MAXDIST;};
+  dfZones=[];
+  for(const f of arr){
+    if(dfZones.length>=ZONE_CAP)break;
+    const props=f.properties||f;
+    const restriction=(props.restriction||props.restrictionType||props.type||'').toString();
+    const name=(props.name||props.identifier||f.identifier||f.name||'Zona UAS').toString();
+    let geoms=f.geometry||props.geometry||f.geometries||[];
+    if(geoms&&!Array.isArray(geoms))geoms=[geoms];
+    if((!geoms||!geoms.length)&&f.type==='Feature'&&f.geometry)geoms=[f.geometry];
+    let polys=[],lower=0,upper=null,uom='m';
+    for(const g of geoms){
+      const ps=asPolys(g); if(!ps.length)continue;
+      polys=polys.concat(ps);
+      if(g.lowerLimit!=null)lower=+g.lowerLimit;
+      if(g.upperLimit!=null)upper=+g.upperLimit;
+      if(g.uomDimensions||g.uom)uom=(g.uomDimensions||g.uom);
+    }
+    if(!polys.length)continue;
+    // proximity filter on first ring centroid
+    const r0=polys[0];let clon=0,clat=0;r0.forEach(p=>{clon+=p[0];clat+=p[1];});clon/=r0.length;clat/=r0.length;
+    if(!near(clon,clat))continue;
+    const local=polys.map(ring=>ring.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}));
+    dfZones.push({name,restriction,color:restrColor(restriction),lower,upper,uom,polys:local,gpolys:polys,clon,clat});
+  }
+}
+function buildZones(){
+  while(zoneGroup.children.length)zoneGroup.remove(zoneGroup.children[0]);
+  dfZones.forEach(z=>{
+    z.polys.forEach(ring=>{
+      const shape=new THREE.Shape(ring.map(p=>new THREE.Vector2(p.x,-p.z)));
+      const fill=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:z.color,transparent:true,opacity:0.16,side:THREE.DoubleSide,depthWrite:false}));
+      fill.rotation.x=-Math.PI/2; fill.position.y=0.4; zoneGroup.add(fill);
+      const pts=ring.map(p=>new THREE.Vector3(p.x,0.5,p.z)); pts.push(pts[0]);
+      zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:z.color})));
+    });
+  });
+  zoneGroup.visible=$('zoneToggle').checked;
+  renderZoneList();
+}
+function renderZoneList(){
+  $('zoneCount').textContent=dfZones.length;
+  const L=$('zoneList');
+  if(!dfZones.length){L.innerHTML='<div class="empty">Nessuna zona caricata (o nessuna entro 15 km dalla Home).</div>';return;}
+  L.innerHTML='';
+  dfZones.slice(0,120).forEach(z=>{
+    const hex='#'+z.color.toString(16).padStart(6,'0');
+    const el=document.createElement('div');el.className='wp';el.style.cursor='default';
+    el.innerHTML=`<div class="h"><div class="idx"><span class="num" style="background:${hex};width:10px;height:10px"></span> ${z.name}</div></div>
+      <div class="meta"><span style="color:${hex}">${z.restriction||'—'}</span><span>${z.lower||0}–${z.upper!=null?z.upper:'∞'} ${z.uom} </span></div>`;
+    L.appendChild(el);
+  });
+}
+function pointInPoly(x,z,ring){let inside=false;for(let i=0,j=ring.length-1;i<ring.length;j=i++){const xi=ring[i].x,zi=ring[i].z,xj=ring[j].x,zj=ring[j].z;if(((zi>z)!=(zj>z))&&(x<(xj-xi)*(z-zi)/(zj-zi)+xi))inside=!inside;}return inside;}
+function relocalizeZones(){if(!dfZones.length)return;dfZones.forEach(z=>{z.polys=z.gpolys.map(ring=>ring.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}));});buildZones();checkZones();renderWpList();}
+function checkZones(){
+  let conflicts=0;
+  waypoints.forEach(w=>{ w._zone=null;
+    if(!dfZones.length)return;
+    for(const z of dfZones){
+      if(/NO_RESTRICTION|^$/.test((z.restriction||'').toUpperCase()))continue;
+      for(const ring of z.polys){ if(pointInPoly(w.x,w.z,ring)){ w._zone=z; conflicts++; break; } }
+      if(w._zone)break;
+    }
+  });
+  const c=$('zoneConflict');
+  if(!dfZones.length)c.textContent='';
+  else if(conflicts)c.innerHTML=`⚠ <b style="color:var(--red)">${conflicts}</b> waypoint dentro zone con restrizioni — verifica su d-flight.it.`;
+  else c.innerHTML=`✓ <b style="color:var(--green)">Nessun waypoint</b> nelle zone caricate.`;
+  return conflicts;
 }
 
 /* ===================== SIMULATION ===================== */
