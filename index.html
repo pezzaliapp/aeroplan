@@ -1408,8 +1408,10 @@ function loop(now){
   drone.userData.rotors.forEach((r,i)=>r.rotation.y+=(i%2?1:-1)*(playing?1.2:0.35));
   poiGroup.children[0]&&(poiGroup.children[0].rotation.y+=0.02);
   if(tipNeedsUpdate&&tipMouse){tipNeedsUpdate=false;updateHoverTip(tipMouse.x,tipMouse.y);}   // Fix 3 — hover tooltip zona, throttle a 1/frame
-  // B3 — drone + pad di lancio sempre leggibili: dimensione apparente ~costante in ORBIT (no scaling in chase/fpv, camera vicina)
-  if(camMode==='orbit'){const s=clamp(orbit.dist*0.008,1,28);drone.scale.setScalar(s);padRing.scale.setScalar(s);}
+  // drone + pad: dimensione COSTANTE sullo schermo a QUALSIASI zoom in ORBIT.
+  // la dimensione apparente dipende dalla distanza camera→drone reale: scala ∝ distanza ⇒ pixel costanti.
+  // (niente clamp: era il clamp 1..28 a renderlo gigante da vicino e minuscolo da lontano). Niente scaling in chase/fpv.
+  if(camMode==='orbit'){const s=Math.max(0.25,cam.position.distanceTo(drone.position)*0.007);drone.scale.setScalar(s);padRing.scale.setScalar(s);}
   else {drone.scale.setScalar(1);padRing.scale.setScalar(1);}
   if(playing){
     simT+=dt*simSpeed; const st=simState(simT);

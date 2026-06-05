@@ -1,5 +1,5 @@
 /* AeroPlan service worker — bump VERSION on every release to push an update */
-const VERSION = 'aeroplan-v1.3.0';
+const VERSION = 'aeroplan-v1.3.1';
 const APP_SHELL = [
   './',
   './index.html',
