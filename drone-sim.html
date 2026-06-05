@@ -325,6 +325,7 @@
       <button data-cam="orbit" class="active">ORBIT</button>
       <button data-cam="chase">CHASE</button>
       <button data-cam="fpv">FPV</button>
+      <button id="resetView" title="Torna alla vista Home">↺ Vista</button>
     </div>
     <div class="attrib" id="attrib">Imagery © Esri, Maxar, Earthstar Geographics</div>
     <div class="toast" id="toast"></div>
@@ -810,8 +811,7 @@ async function loadBasemap(kind){
     cam.far=far;fpvCam.far=far;cam.updateProjectionMatrix();fpvCam.updateProjectionMatrix();
     scene.fog = worldSize>6000 ? null : new THREE.FogExp2(0x0a1018,0.0014);
     orbit.maxDist=Math.max(2500,worldSize*1.4);
-    if(worldSize>6000) orbit.dist=clamp(worldSize*0.55,orbit.dist,orbit.maxDist);
-    orbit.dist=Math.min(orbit.dist,orbit.maxDist);
+    frameHome(worldSize);
     $('attrib').textContent=B.attr;$('attrib').style.display='block';
     currentBase=kind; markBase();
     relocalizeZones();
@@ -828,6 +828,7 @@ const zoneGroup=new THREE.Group(); scene.add(zoneGroup);
 let dfZones=[];                 // zones currently shown (near Home), projected to local
 let allZones=[];                // full parsed dataset (geo only), re-filtered when Home moves
 let zoneMeta={versionStr:null,versionDate:null,savedAt:null};
+let zoneSel=null;
 let ZONE_MAXDIST=20000; const ZONE_CAP=800;
 function restrInfo(r){r=(r||'').toUpperCase();
   if(/PROHIB|NO_FLY|NOFLY|FORBID/.test(r))return{color:0xff5a6a,word:'VIETATO',note:'Volo non consentito'};
@@ -967,27 +968,36 @@ function selectNearby(){
 function buildZones(){
   while(zoneGroup.children.length)zoneGroup.remove(zoneGroup.children[0]);
   dfZones.forEach(z=>{
+    const sel=(z.name===zoneSel);
     z.polys.forEach(ring=>{
       const shape=new THREE.Shape(ring.map(p=>new THREE.Vector2(p.x,-p.z)));
-      const fill=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:z.color,transparent:true,opacity:0.16,side:THREE.DoubleSide,depthWrite:false}));
-      fill.rotation.x=-Math.PI/2; fill.position.y=0.4; zoneGroup.add(fill);
-      const pts=ring.map(p=>new THREE.Vector3(p.x,0.5,p.z)); pts.push(pts[0]);
-      zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:z.color})));
+      const fill=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:z.color,transparent:true,opacity:sel?0.34:0.16,side:THREE.DoubleSide,depthWrite:false}));
+      fill.rotation.x=-Math.PI/2; fill.position.y=sel?0.6:0.4; zoneGroup.add(fill);
+      const pts=ring.map(p=>new THREE.Vector3(p.x,sel?0.8:0.5,p.z)); pts.push(pts[0]);
+      zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:sel?0xffffff:z.color})));
+      if(sel){ const pts2=ring.map(p=>new THREE.Vector3(p.x,0.82,p.z)); pts2.push(pts2[0]); zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2),new THREE.LineBasicMaterial({color:z.color}))); }
     });
   });
   zoneGroup.visible=$('zoneToggle').checked;
   renderZoneList();
 }
+function frameHome(worldSize){
+  // vista dall'alto, nord in su, centrata sulla Home
+  camMode='orbit'; document.querySelectorAll('.vbadge button[data-cam]').forEach(x=>x.classList.toggle('active',x.dataset.cam==='orbit'));
+  orbit.tgt.set(0,0,0); orbit.az=0; orbit.pol=0.30;
+  const ws=worldSize||WORLD.size||2400;
+  orbit.dist=clamp(ws*0.62,200,orbit.maxDist||2500);
+}
 function focusZone(z){
   let sx=0,sz=0,c=0,minx=1e9,minz=1e9,maxx=-1e9,maxz=-1e9;
   z.polys.forEach(r=>r.forEach(p=>{sx+=p.x;sz+=p.z;c++;minx=Math.min(minx,p.x);maxx=Math.max(maxx,p.x);minz=Math.min(minz,p.z);maxz=Math.max(maxz,p.z);}));
   if(!c)return;
-  const cx=sx/c, cz=sz/c, rad=Math.max(Math.hypot(maxx-minx,maxz-minz)/2,80);
-  // assicurati di essere in ORBIT
-  camMode='orbit'; document.querySelectorAll('.vbadge button').forEach(x=>x.classList.toggle('active',x.dataset.cam==='orbit'));
+  const cx=sx/c, cz=sz/c, rad=Math.max(Math.hypot(maxx-minx,maxz-minz)/2,120);
+  camMode='orbit'; document.querySelectorAll('.vbadge button[data-cam]').forEach(x=>x.classList.toggle('active',x.dataset.cam==='orbit'));
+  // SOLO pan + zoom: mantieni l'orientamento attuale (niente vista storta)
   orbit.tgt.set(cx,0,cz);
-  orbit.dist=clamp(rad*2.6,120,orbit.maxDist||2500);
-  orbit.pol=0.85;
+  orbit.dist=clamp(rad*2.4,200,orbit.maxDist||2500);
+  zoneSel=z.name; buildZones();
   toast('Zona: '+z.name);
 }
 function renderZoneList(){
@@ -1055,7 +1065,8 @@ $('simseg').addEventListener('click',e=>{const a=e.target.dataset.act;if(!a)retu
   if(a==='pause'){playing=false;e.target.classList.add('active');$('hMode').textContent='PAUSED';}
   if(a==='stop'){playing=false;simT=0;travelled=0;lastPos.set(0,3,0);$('hMode').textContent='PLANNING';$('crosshair').classList.remove('on');resetTelem();drone.position.set(0,3,0);}});
 $('simspeed').addEventListener('change',e=>simSpeed=+e.target.value);
-document.querySelectorAll('.vbadge button').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.vbadge button').forEach(x=>x.classList.remove('active'));b.classList.add('active');camMode=b.dataset.cam;}));
+document.querySelectorAll('.vbadge button[data-cam]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.vbadge button[data-cam]').forEach(x=>x.classList.remove('active'));b.classList.add('active');camMode=b.dataset.cam;}));
+$('resetView').onclick=()=>{ zoneSel=null; if(allZones.length)buildZones(); frameHome(WORLD.size); toast('Vista ripristinata'); };
 function resetTelem(){['tSpd','tAlt'].forEach(i=>$(i).textContent='0.0');['tHome','tTrav'].forEach(i=>$(i).textContent='0');$('tBat').textContent='100';$('tBatBar').style.width='100%';$('tTime').textContent='00:00';$('tEta').textContent='--:--';$('tBatBox').className='gauge bat';$('hAlt').textContent='0.0';$('hSpd').textContent='0.0';$('hDist').textContent='0';$('hWp').textContent='--';}
 function fmtTime(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(Math.floor(s%60)).padStart(2,'0');}
 
