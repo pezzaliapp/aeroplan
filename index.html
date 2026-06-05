@@ -908,6 +908,30 @@ function restrColor(r){r=(r||'').toUpperCase();
 }
 // quota massima della zona convertita in METRI (gestisce uom 'ft'/'feet')
 function zoneUpperM(z){ if(z==null||z.upper==null)return null; const u=(z.uom||'m').toString().toLowerCase(); return (/ft|feet/.test(u))? z.upper*0.3048 : z.upper; }
+// B6 — la zona è attiva adesso? (permanente o validità non indicata ⇒ trattata come attiva)
+function isZoneActiveNow(z){
+  const ap=z&&z.applicability; if(!ap||!ap.length)return true;
+  const now=Date.now(); let hasWindow=false;
+  for(const a of ap){ if(a==null)continue;
+    if(a.permanent===true||a.permanent==='true')return true;
+    const s=a.startDateTime||a.start||a.from, e=a.endDateTime||a.end||a.to;
+    if(!s&&!e)continue; hasWindow=true;
+    const ts=s?Date.parse(s):-Infinity, te=e?Date.parse(e):Infinity;
+    if(!isNaN(ts)&&!isNaN(te)&&now>=ts&&now<=te)return true;
+  }
+  return hasWindow?false:true;   // finestre non interpretabili ⇒ assumi attiva (e segnala in lista)
+}
+function fmtApplicability(z){
+  const ap=z&&z.applicability; if(!ap||!ap.length)return '';
+  const fmt=s=>{const d=new Date(s);return isNaN(d)?String(s):d.toLocaleString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});};
+  const parts=[];
+  for(const a of ap){ if(a==null)continue;
+    if(a.permanent===true||a.permanent==='true'){parts.push('permanente');continue;}
+    const s=a.startDateTime||a.start||a.from, e=a.endDateTime||a.end||a.to;
+    if(s||e)parts.push((s?fmt(s):'…')+' → '+(e?fmt(e):'…'));
+  }
+  return parts.join(' · ');
+}
 // B9 — banner verdetto "posso decollare?": riusa i conteggi già calcolati in checkZones
 function updateVerdict(homeZone,homeUpper,nViet,nAuth,nOther){
   const el=$('verdict'); if(!el)return;
@@ -1043,10 +1067,14 @@ function parseED269(data){
       if(g.uomDimensions||g.uom)uom=(g.uomDimensions||g.uom);
     }
     if(!polys.length)continue;
+    // B6 — validità temporale: ED-269 contiene zone dinamiche (NOTAM/NFZ) con finestre di attivazione
+    let applicability=props.applicability||props.applicableTimePeriod||props.timeApplicability||null;
+    const apArr=applicability==null?[]:(Array.isArray(applicability)?applicability:[applicability]);
+    const dynamic=apArr.some(a=>a&&(a.startDateTime||a.start||a.endDateTime||a.end||a.from||a.to));
     // bounding box over all rings (for proximity test independent of Home)
     let minLon=Infinity,minLat=Infinity,maxLon=-Infinity,maxLat=-Infinity;
     polys.forEach(r=>r.forEach(p=>{if(p[0]<minLon)minLon=p[0];if(p[0]>maxLon)maxLon=p[0];if(p[1]<minLat)minLat=p[1];if(p[1]>maxLat)maxLat=p[1];}));
-    allZones.push({name,restriction,color:altColor(upper),lower,upper,uom,gpolys:polys,bbox:[minLon,minLat,maxLon,maxLat]});
+    allZones.push({name,restriction,color:altColor(upper),lower,upper,uom,applicability:apArr,dynamic,gpolys:polys,bbox:[minLon,minLat,maxLon,maxLat]});
   }
 }
 function selectNearby(){
@@ -1067,14 +1095,18 @@ function buildZones(){
   while(zoneGroup.children.length)zoneGroup.remove(zoneGroup.children[0]);
   dfZones.forEach(z=>{
     const sel=(z.name===zoneSel);
+    const active=isZoneActiveNow(z);                       // B6
+    const bcol=sel?0xffffff:(active?z.color:0x5a6678);     // zone non attive ora ⇒ grigie
     z.polys.forEach(ring=>{
       const shape=new THREE.Shape(ring.map(p=>new THREE.Vector2(p.x,-p.z)));
       // height band kept tight & low (0.28–0.5) so the overlay stays "glued" to the
       // basemap plane (y=0.05) and doesn't visibly float/parallax at oblique zoom
-      const fill=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:z.color,transparent:true,opacity:sel?0.22:0.14,side:THREE.DoubleSide,depthWrite:false}));
+      const fill=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:z.color,transparent:true,opacity:active?(sel?0.22:0.14):0.05,side:THREE.DoubleSide,depthWrite:false}));
       fill.rotation.x=-Math.PI/2; fill.position.y=sel?0.32:0.28; fill.userData.isZoneFill=true; fill.renderOrder=1; zoneGroup.add(fill);
       const pts=ring.map(p=>new THREE.Vector3(p.x,sel?0.46:0.34,p.z)); pts.push(pts[0]);
-      zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:sel?0xffffff:z.color})));
+      // bordo tratteggiato per zone dinamiche (NOTAM/NFZ) o non attive; pieno per le statiche
+      const lmat=(z.dynamic||!active)?new THREE.LineDashedMaterial({color:bcol,dashSize:8,gapSize:5}):new THREE.LineBasicMaterial({color:bcol});
+      const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),lmat); if(lmat.isLineDashedMaterial)line.computeLineDistances(); zoneGroup.add(line);
       if(sel){ const pts2=ring.map(p=>new THREE.Vector3(p.x,0.5,p.z)); pts2.push(pts2[0]); zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2),new THREE.LineBasicMaterial({color:z.color}))); }
     });
   });
@@ -1114,9 +1146,11 @@ function renderZoneList(){
   dfZones.slice(0,150).forEach(z=>{
     const ri=restrInfo(z.restriction), pcol='#'+ri.color.toString(16).padStart(6,'0'), acol='#'+(z.color>>>0).toString(16).padStart(6,'0');
     const el=document.createElement('div');el.className='wp';el.style.cursor='pointer';el.title='Mostra sulla mappa';
+    const act=isZoneActiveNow(z), val=fmtApplicability(z);
     el.innerHTML=`<div class="h"><div class="idx"><span class="num" style="background:${acol};width:10px;height:10px"></span> ${z.name}</div><span style="color:var(--faint);font-size:11px">📍</span></div>
-      <div class="meta"><span style="color:${pcol};font-weight:700">${ri.word}</span><span>max ${z.upper!=null?z.upper:120} ${z.uom} AGL</span></div>
-      <div class="meta"><span style="color:var(--faint)">${ri.note}</span></div>`;
+      <div class="meta"><span style="color:${pcol};font-weight:700">${ri.word}</span><span>max ${z.upper!=null?z.upper:120} ${z.uom} AGL</span>${z.dynamic?'<span style="color:var(--violet)">⟜ dinamica</span>':''}</div>
+      <div class="meta"><span style="color:var(--faint)">${ri.note}</span></div>
+      ${(z.dynamic||val)?`<div class="meta"><span style="color:${act?'var(--cyan)':'var(--faint)'}">🕒 ${act?'attiva ora':'NON attiva ora'}${val?' · '+val:' · validità non indicata'}</span></div>`:''}`;
     el.onclick=()=>focusZone(z);
     L.appendChild(el);
   });
@@ -1129,6 +1163,7 @@ function checkZones(){
     if(!dfZones.length)return;
     let restrHit=null, minUpper=null, minUpperZone=null;
     for(const z of dfZones){
+      if(!isZoneActiveNow(z))continue;   // B6 — ignora zone dinamiche non attive ora
       let inside=false; for(const ring of z.polys){ if(pointInPoly(w.x,w.z,ring)){ inside=true; break; } }
       if(!inside)continue;
       // B8 — quota: tieni la zona con il limite verticale più basso tra quelle che contengono il waypoint
@@ -1140,11 +1175,11 @@ function checkZones(){
   });
   // controllo del punto di DECOLLO (Home = origine locale 0,0)
   let homeZone=null;
-  for(const z of dfZones){ if(/NO_RESTRICTION|^$/.test((z.restriction||'').toUpperCase()))continue;
+  for(const z of dfZones){ if(!isZoneActiveNow(z))continue; if(/NO_RESTRICTION|^$/.test((z.restriction||'').toUpperCase()))continue;
     for(const ring of z.polys){ if(pointInPoly(0,0,ring)){ homeZone=z; break; } } if(homeZone)break; }
-  // quota massima consentita al decollo = min upper tra TUTTE le zone che contengono la Home (anche senza restrizioni testuali)
+  // quota massima consentita al decollo = min upper tra TUTTE le zone attive che contengono la Home (anche senza restrizioni testuali)
   let homeUpper=null;
-  for(const z of dfZones){ for(const ring of z.polys){ if(pointInPoly(0,0,ring)){ const um=zoneUpperM(z); if(um!=null)homeUpper=(homeUpper==null?um:Math.min(homeUpper,um)); break; } } }
+  for(const z of dfZones){ if(!isZoneActiveNow(z))continue; for(const ring of z.polys){ if(pointInPoly(0,0,ring)){ const um=zoneUpperM(z); if(um!=null)homeUpper=(homeUpper==null?um:Math.min(homeUpper,um)); break; } } }
   updateVerdict(homeZone,homeUpper,nViet,nAuth,nOther);
   const c=$('zoneConflict'), tot=nViet+nAuth+nOther;
   let html='';
