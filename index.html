@@ -193,8 +193,11 @@
           <div class="field"><label>Quota suolo (m)</label><input type="number" id="homeAlt" step="1" value="120"></div>
           <div class="field"><label>Cerca città</label><input type="text" id="geoSearch" placeholder="es. Roma"></div>
         </div>
-        <button class="btn" id="satBtn" style="width:100%;justify-content:center">🛰 Carica mappa satellitare</button>
-        <p class="hint" id="satHint">Carica tile satellitari reali (Esri) attorno alla Home. Richiede connessione; in alcune anteprime integrate può essere bloccato — in tal caso apri il file in una scheda browser.</p>
+        <div class="row2" style="margin-bottom:8px">
+          <button class="btn" id="geoBtn" style="justify-content:center">📍 Mia posizione</button>
+          <button class="btn" id="satBtn" style="justify-content:center">🛰 Satellite</button>
+        </div>
+        <p class="hint" id="satHint">Usa "Mia posizione" per centrare la Home sul GPS del dispositivo (richiede HTTPS e permesso). I tile satellitari (Esri) vengono caricati attorno alla Home.</p>
       </div>
     </div>
 
@@ -436,8 +439,12 @@ function rebuildWaypoints(){
     const sel=i===selected, col=sel?0xff9d2e:wpColor(w);
     const m=new THREE.Mesh(new THREE.SphereGeometry(sel?2.4:1.6,14,14),new THREE.MeshStandardMaterial({color:col,emissive:col,emissiveIntensity:.6}));
     m.position.set(w.x,w.alt,w.z); wpGroup.add(m);
-    const pole=new THREE.Mesh(new THREE.CylinderGeometry(.1,.1,w.alt,6),new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.25}));
+    const pole=new THREE.Mesh(new THREE.CylinderGeometry(.12,.12,w.alt,6),new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.4}));
     pole.position.set(w.x,w.alt/2,w.z); wpGroup.add(pole);
+    const ring=new THREE.Mesh(new THREE.RingGeometry(2.2,3.4,28),new THREE.MeshBasicMaterial({color:col,side:THREE.DoubleSide,transparent:true,opacity:.8}));
+    ring.rotation.x=-Math.PI/2; ring.position.set(w.x,0.35,w.z); wpGroup.add(ring);
+    const dot=new THREE.Mesh(new THREE.CircleGeometry(1.1,18),new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.45}));
+    dot.rotation.x=-Math.PI/2; dot.position.set(w.x,0.36,w.z); wpGroup.add(dot);
   });
   if(waypoints.length){
     const pts=[new THREE.Vector3(0,3,0),...waypoints.map(w=>new THREE.Vector3(w.x,w.alt,w.z))];
@@ -657,13 +664,26 @@ function updateMissionStats(){
 
 /* ===================== SATELLITE ===================== */
 $('satBtn').onclick=()=>{ if(satPlane){removeSatellite();} else loadSatellite(); };
+$('geoBtn').onclick=()=>{
+  if(!navigator.geolocation){toast('Geolocalizzazione non supportata');return;}
+  if(location.protocol!=='https:'&&location.hostname!=='localhost'){toast('La geolocalizzazione richiede HTTPS');}
+  const b=$('geoBtn');b.textContent='📍 Localizzo…';b.disabled=true;
+  navigator.geolocation.getCurrentPosition(pos=>{
+    home.lat=+pos.coords.latitude.toFixed(6);home.lon=+pos.coords.longitude.toFixed(6);
+    $('homeLat').value=home.lat;$('homeLon').value=home.lon;
+    b.textContent='📍 Mia posizione';b.disabled=false;
+    toast('Posizione acquisita (±'+Math.round(pos.coords.accuracy)+'m) — carico satellite');
+    loadSatellite();
+  },err=>{ b.textContent='📍 Mia posizione';b.disabled=false; toast('Posizione non disponibile: '+err.message); },
+  {enableHighAccuracy:true,timeout:12000,maximumAge:60000});
+};
 function removeSatellite(){
   if(satPlane){scene.remove(satPlane);satPlane.geometry.dispose();satPlane.material.map?.dispose();satPlane.material.dispose();satPlane=null;}
   terrain.visible=true;grid.visible=true;proceduralGroup.visible=true;groundMesh=terrain;WORLD.size=2400;
-  $('attrib').style.display='none';$('satBtn').textContent='🛰 Carica mappa satellitare';toast('Terreno procedurale');
+  $('attrib').style.display='none';$('satBtn').textContent='🛰 Satellite';toast('Terreno procedurale');
 }
 async function loadSatellite(){
-  $('satBtn').textContent='⏳ Caricamento tile…';$('satBtn').disabled=true;
+  $('satBtn').textContent='⏳ …';$('satBtn').disabled=true;
   try{
     const z=16,k=2,n=2**z,latRad=home.lat*Math.PI/180;
     const fx=(home.lon+180)/360*n, fy=(1-Math.asinh(Math.tan(latRad))/Math.PI)/2*n;
@@ -690,11 +710,11 @@ async function loadSatellite(){
     satPlane=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({map:tex,roughness:1}));
     satPlane.position.set(-eastOff,0.05,northOff); satPlane.receiveShadow=true; scene.add(satPlane);
     terrain.visible=false;grid.visible=false;proceduralGroup.visible=false;groundMesh=satPlane;WORLD.size=worldSize;
-    $('attrib').style.display='block';$('satBtn').textContent='🗺 Torna al terreno procedurale';
+    $('attrib').style.display='block';$('satBtn').textContent='🗺 Procedurale';
     toast('Satellite caricato ('+ok+'/'+(span*span)+' tile)');
   }catch(err){
     toast('Satellite non disponibile — '+err.message);
-    $('satBtn').textContent='🛰 Carica mappa satellitare';
+    $('satBtn').textContent='🛰 Satellite';
   }
   $('satBtn').disabled=false;
 }
