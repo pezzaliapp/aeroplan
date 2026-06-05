@@ -341,6 +341,26 @@
   </div>
 </div>
 
+<div class="modal on" id="disclaimer">
+  <div class="dlg">
+    <h3>⚠ Avviso importante</h3>
+    <div class="c">
+      <p style="line-height:1.6;font-size:13px">AeroPlan è uno strumento di <b>pianificazione e simulazione</b> di voli con drone, realizzato a scopo didattico e di supporto. <b>Non è una fonte ufficiale</b> e non sostituisce gli enti competenti.</p>
+      <p style="line-height:1.6;font-size:13px;margin-top:10px">Prima di accedere, prendi atto che:</p>
+      <ul style="line-height:1.7;font-size:12px;color:var(--dim);margin:8px 0 0 18px">
+        <li>La fonte ufficiale per le zone e i permessi di volo in Italia è <b>d-flight.it</b> (ENAC/ENAV): <b>verifica sempre lì</b> prima di ogni volo.</li>
+        <li>Le zone UAS importate (ED-269) possono essere <b>non aggiornate</b> (cambiano a ogni ciclo AIRAC, ~28 giorni). Controlla la data del dato.</li>
+        <li>Il controllo dei waypoint è un <b>ausilio</b>, planimetrico e non esaustivo: non garantisce la conformità del volo.</li>
+        <li>L'export WPML è supportato <b>solo dai droni DJI Enterprise</b>; verifica la missione in DJI Pilot 2 prima del volo.</li>
+        <li>La responsabilità della pianificazione e del volo è <b>esclusivamente del pilota/operatore</b>, nel rispetto delle norme EASA/ENAC e della privacy.</li>
+      </ul>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:14px;cursor:pointer;font-size:12px;color:var(--dim)"><input type="checkbox" id="dontShow" style="width:auto"> Non mostrare più all'avvio</label>
+      <button class="btn primary" id="acceptDisc" style="width:100%;justify-content:center;margin-top:12px">Ho capito e accetto</button>
+      <p style="text-align:center;font-size:10px;color:var(--faint);margin-top:10px">© Alessandro Pezzali — pezzaliAPP · uso a proprio rischio</p>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="modal">
   <div class="dlg">
     <h3>Export Missione <span class="x" id="modalX">✕</span></h3>
@@ -1243,6 +1263,13 @@ ${waypoints.map(placemark).join('\n')}
 /* ===================== INIT ===================== */
 renderPresets();selPreset('custom');renderDjiModels();updateWpmlDesc();syncSliders();updateSurveyInfo();updateOrbStat();updateCorrStat();resize();resetTelem();renderWpList();
 tryRestoreZones();
+
+/* ---- startup disclaimer gate ---- */
+(function(){
+  let accepted=false; try{accepted=localStorage.getItem('aeroplan_disc')==='1';}catch(e){}
+  if(accepted)$('disclaimer').classList.remove('on');
+  $('acceptDisc').onclick=()=>{ try{ if($('dontShow').checked)localStorage.setItem('aeroplan_disc','1'); }catch(e){} $('disclaimer').classList.remove('on'); };
+})();
 requestAnimationFrame(loop);
 
 /* ---- PWA service worker (auto-update) ---- */

@@ -1,15 +1,21 @@
 # AeroPlan — Drone Flight Planner & Simulator
 **by pezzaliAPP — © Alessandro Pezzali (PezzaliApp)**
 
-Simulatore 3D, configuratore e pianificatore di volo drone, eseguibile interamente nel browser (nessun backend). Pianifica waypoint, POI/orbite, griglie fotogrammetriche e corridor mapping, simula il volo con telemetria live, ed esporta missioni nei formati dei droni reali.
+Simulatore 3D, configuratore e pianificatore di volo drone, eseguibile interamente nel browser (nessun backend). Pianifica waypoint, POI/orbite, griglie fotogrammetriche e corridor mapping, simula il volo con telemetria live, ed esporta missioni nei formati dei droni reali. All'avvio mostra un avviso di responsabilità che va accettato prima dell'uso.
 
 ## Funzioni
-- **Vista 3D** (Three.js) con terreno procedurale o **mappa satellitare reale** (Esri World Imagery).
-- **Geolocalizzazione** — pulsante *📍 Mia posizione*: centra la Home sul GPS del dispositivo (richiede HTTPS + permesso) e carica i tile satellitari attorno a te.
+- **Avviso all'avvio**: finestra di disclaimer (con opzione "non mostrare più") che ricorda i limiti d'uso e la responsabilità del pilota.
+- **Vista 3D** (Three.js) con tre basi selezionabili: **Terreno** procedurale, **Satellite** (Esri World Imagery) o **Mappa** stradale (Esri/OpenStreetMap, stile D-Flight).
+- **Geolocalizzazione** — *📍 Mia posizione*: centra la Home sul GPS del dispositivo (richiede HTTPS + permesso); lascia emergere i prompt nativi del browser.
 - **Configuratore**: preset DJI + parametri volo/camera; selettore modello per l'export WPML.
 - **Pianificazione**: Waypoint, **POI + Orbita**, **Griglia fotogrammetrica**, **Corridor mapping**.
-- **Zone UAS · D-Flight (ED-269)**: importa il file ufficiale delle zone geografiche UAS scaricato dal tuo profilo d-flight.it, le visualizza sulla mappa (vietate / autorizzazione / condizionate) e **controlla i waypoint**, segnalando quelli dentro aree con restrizioni.
-- **Simulazione**: percorso + RTH, telemetria (velocità, quota, batteria, ETA), camere Orbit/Chase/FPV.
+- **Zone UAS · D-Flight (ED-269)**:
+  - importa il file ufficiale (accetta direttamente il `.json.gz`, o `.json`/`.zip`);
+  - mostra le zone sulla mappa con **etichette in chiaro** del permesso (🔴 Vietato · 🟠 Autorizzazione · 🟣 Condizionata) e i limiti di quota;
+  - **raggio regolabile** (10/20/40/80 km) per vedere anche le zone adiacenti;
+  - **controllo dei waypoint**: segnala quelli dentro zone con restrizioni, distinguendo vietato/autorizzazione;
+  - **memoria offline** (IndexedDB, opzionale) con indicazione della **data del dato** e avviso se più vecchio di un ciclo AIRAC (~28 giorni).
+- **Simulazione**: percorso + RTH, telemetria (velocità, quota, batteria, ETA), camere **Orbit/Chase/FPV**.
 - **Export**: **DJI WPML `.kmz`** (conforme al modello), **DJI template-only `.kmz`**, **Litchi `.csv`**, **KML**, **GPX**, **JSON** nativo, **CSV** semplice.
 - **Import**: `.json` (round-trip completo), `.kmz` / `.wpml` / `.kml` (ricostruisce i waypoint).
 - **PWA**: installabile e funzionante offline tramite service worker con auto-update.
@@ -34,28 +40,25 @@ README.md
 > Il service worker richiede HTTPS (GitHub Pages lo fornisce) o `localhost`. Aperto come `file://` l'app funziona ma senza SW/offline. Anche la **geolocalizzazione** richiede HTTPS.
 
 ## Aggiornamento automatico (sw.js)
-Il service worker usa una cache **versionata** + strategia *stale-while-revalidate*:
-- ad ogni nuovo deploy **incrementa `VERSION`** in `sw.js` (es. `aeroplan-v1.0.4`);
-- al caricamento successivo il nuovo SW si installa, l'app mostra il banner **"Nuova versione disponibile"**: toccandolo si applica l'update e la pagina si ricarica con i file più recenti;
+Cache **versionata** + strategia *stale-while-revalidate*:
+- ad ogni nuovo deploy **incrementa `VERSION`** in `sw.js` (es. `aeroplan-v1.1.5`);
+- al caricamento successivo il nuovo SW si installa e l'app mostra il banner **"Nuova versione disponibile"**: toccandolo si applica l'update e la pagina si ricarica;
 - le vecchie cache vengono eliminate in `activate`.
-
-### Auto-deploy (opzionale, GitHub Actions)
-Per bumpare la versione e pubblicare ad ogni push puoi aggiungere un workflow che riscrive la stringa `VERSION` in `sw.js` con l'hash del commit. In breve: un job che fa `sed` di `VERSION` con `${{ github.sha }}` prima del deploy Pages. (Chiedi pure e te lo genero.)
 
 ## Zone UAS (D-Flight / ED-269)
 D-Flight non offre un'API pubblica gratuita, ma pubblica le zone geografiche UAS scaricabili gratis nel formato standard **EUROCAE ED-269** (JSON), come previsto dal Reg. UE 2019/947.
-1. Accedi a **d-flight.it** → profilo → **Download UAS Zone Geo** (ottieni uno zip da scompattare in JSON).
-2. In AeroPlan: sezione *Zone UAS · D-Flight* → **🛡 Carica ED-269** (accetta `.json` o `.zip`).
+1. Accedi a **d-flight.it** → profilo → **Download UAS Geo Zone** (ottieni un `.json.gz`).
+2. In AeroPlan: sezione *Zone UAS · D-Flight* → **🛡 Carica ED-269** (accetta direttamente il `.json.gz`, oppure `.json`/`.zip`).
 
-Le zone entro ~15 km dalla Home vengono disegnate e i waypoint controllati. **Dato a solo scopo informativo**: la fonte ufficiale resta d-flight.it, da consultare sempre prima del volo.
+Con "Ricorda offline" il file resta salvato nel browser (IndexedDB) per le sessioni successive; l'app mostra sempre la **data del dato** e avvisa se è scaduto il ciclo AIRAC. **Dato a solo scopo informativo**: la fonte ufficiale resta d-flight.it.
 
 ## Disclaimer
-Strumento di **pianificazione e simulazione**. Il WPML usa i valori ufficiali `droneEnumValue`/`payloadEnumValue` DJI, ma è supportato **solo dai droni Enterprise**; verifica sempre la missione in DJI Pilot 2 (RTH, no-fly zone, quota relativa) prima di volare. La responsabilità del volo è del pilota.
+Strumento di **pianificazione e simulazione**. Il WPML usa i valori ufficiali `droneEnumValue`/`payloadEnumValue` DJI, ma è supportato **solo dai droni Enterprise**; verifica sempre la missione in DJI Pilot 2 (RTH, no-fly zone, quota relativa) prima di volare. Le zone UAS possono non essere aggiornate. La responsabilità della pianificazione e del volo è esclusivamente del pilota/operatore, nel rispetto delle norme EASA/ENAC e della privacy.
 
 ## Licenza & crediti
 **© Alessandro Pezzali — PezzaliApp. Tutti i diritti riservati.**
 "AeroPlan" e il marchio **pezzaliAPP** sono di proprietà di Alessandro Pezzali. Vedi il file [`LICENSE`](LICENSE) per i termini d'uso.
 
-Crediti tecnici: [Three.js](https://threejs.org), [JSZip](https://stuk.github.io/jszip/), imagery © Esri / Maxar / Earthstar Geographics, zone UAS © d-flight S.p.A. (Gruppo ENAV).
+Crediti tecnici: [Three.js](https://threejs.org), [JSZip](https://stuk.github.io/jszip/), imagery © Esri / Maxar / Earthstar Geographics, mappa © Esri / HERE / Garmin / OpenStreetMap contributors, zone UAS © d-flight S.p.A. (Gruppo ENAV).
 
 — *Made by pezzaliAPP · [pezzaliapp.com](https://pezzaliapp.com)*
