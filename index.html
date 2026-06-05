@@ -901,6 +901,8 @@ function restrInfo(r){r=(r||'').toUpperCase();
   if(/NO_RESTRICTION/.test(r))return{color:0x46d97f,word:'LIBERA',note:'Senza restrizioni'};
   return{color:0x39d6e0,word:(r||'ALTRO'),note:'Verifica su d-flight.it'};
 }
+// B10 — gravità della restrizione per scegliere la zona PIÙ restrittiva tra zone sovrapposte
+function restrRank(r){const w=restrInfo(r).word; return (w==='VIETATO'||w==='PERICOLO')?3:w==='AUTORIZZAZIONE'?2:w==='CONDIZIONATA'?1:0;}
 // B5 — colore della zona: VIETATO/PERICOLO sempre rosso; quota ignota = neutro; altrimenti per quota max (in metri)
 function zoneFillColor(restriction,upperM){
   const ri=restrInfo(restriction);
@@ -1181,7 +1183,11 @@ function checkZones(){
       if(!inside)continue;
       // B8 — quota: tieni la zona con il limite verticale più basso tra quelle che contengono il waypoint
       const um=zoneUpperM(z); if(um!=null&&(minUpper==null||um<minUpper)){minUpper=um;minUpperZone=z;}
-      if(!restrHit&&!/NO_RESTRICTION|^$/.test((z.restriction||'').toUpperCase())) restrHit=z;
+      // B10 — tra zone sovrapposte tieni la più restrittiva; a parità, quella con upper più basso
+      if(!/NO_RESTRICTION|^$/.test((z.restriction||'').toUpperCase())){
+        if(!restrHit) restrHit=z;
+        else { const rk=restrRank(z.restriction)-restrRank(restrHit.restriction); if(rk>0||(rk===0&&(zoneUpperM(z)??1e9)<(zoneUpperM(restrHit)??1e9))) restrHit=z; }
+      }
     }
     if(restrHit){ w._zone=restrHit; const word=restrInfo(restrHit.restriction).word; if(word==='VIETATO')nViet++; else if(word==='AUTORIZZAZIONE')nAuth++; else nOther++; }
     if(minUpper!=null&&w.alt>minUpper+0.5){ w._altViol={max:minUpper,name:(minUpperZone&&minUpperZone.name)||''}; nAlt++; }
@@ -1189,7 +1195,12 @@ function checkZones(){
   // controllo del punto di DECOLLO (Home = origine locale 0,0)
   let homeZone=null;
   for(const z of dfZones){ if(!isZoneActiveNow(z))continue; if(/NO_RESTRICTION|^$/.test((z.restriction||'').toUpperCase()))continue;
-    for(const ring of z.polys){ if(pointInPoly(0,0,ring)){ homeZone=z; break; } } if(homeZone)break; }
+    let inside=false; for(const ring of z.polys){ if(pointInPoly(0,0,ring)){ inside=true; break; } }
+    if(!inside)continue;
+    // B10 — Home: scegli la zona più restrittiva, non la prima incontrata
+    if(!homeZone) homeZone=z;
+    else { const rk=restrRank(z.restriction)-restrRank(homeZone.restriction); if(rk>0||(rk===0&&(zoneUpperM(z)??1e9)<(zoneUpperM(homeZone)??1e9))) homeZone=z; }
+  }
   // quota massima consentita al decollo = min upper tra TUTTE le zone attive che contengono la Home (anche senza restrizioni testuali)
   let homeUpper=null;
   for(const z of dfZones){ if(!isZoneActiveNow(z))continue; for(const ring of z.polys){ if(pointInPoly(0,0,ring)){ const um=zoneUpperM(z); if(um!=null)homeUpper=(homeUpper==null?um:Math.min(homeUpper,um)); break; } } }
