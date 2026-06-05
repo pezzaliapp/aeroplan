@@ -1,0 +1,31 @@
+AeroPlan — Drone Flight Planner & Simulator
+Copyright (c) 2026 Alessandro Pezzali — PezzaliApp (pezzaliAPP)
+All rights reserved. / Tutti i diritti riservati.
+
+"AeroPlan", il marchio "pezzaliAPP" e il codice sorgente di questo progetto
+sono di proprietà di Alessandro Pezzali (PezzaliApp).
+
+È consentito l'uso personale dell'applicazione. Non sono consentiti, senza
+autorizzazione scritta dell'autore: la redistribuzione, la vendita, la
+sublicenza, la rimozione o l'alterazione delle note di copyright e
+dell'attribuzione "by pezzaliAPP".
+
+L'attribuzione all'autore deve restare visibile nell'interfaccia e nel README.
+
+IL SOFTWARE È FORNITO "COSÌ COM'È", SENZA GARANZIE DI ALCUN TIPO. È uno
+strumento di pianificazione e simulazione: la responsabilità della
+pianificazione e dell'esecuzione del volo è esclusivamente del pilota/operatore,
+nel rispetto delle normative vigenti (EASA/ENAC) e delle zone pubblicate su
+d-flight.it. L'autore non è responsabile per danni derivanti dall'uso.
+
+Componenti di terze parti mantengono le rispettive licenze:
+- Three.js (MIT) — https://threejs.org
+- JSZip (MIT/GPL) — https://stuk.github.io/jszip/
+- Imagery © Esri, Maxar, Earthstar Geographics
+- Zone geografiche UAS © d-flight S.p.A. (Gruppo ENAV)
+
+Per richieste di licenza/uso commerciale: contattare l'autore.
+
+NOTA: se desideri rilasciare il progetto con una licenza open source
+(es. MIT, GPLv3, CC BY-NC), sostituisci il contenuto di questo file con il
+testo della licenza scelta.

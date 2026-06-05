@@ -27,6 +27,7 @@
   .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
   .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--amber);box-shadow:0 0 12px var(--amber)}
   .brand small{color:var(--faint);font-weight:500;letter-spacing:.2em;font-size:10px}
+  .brand .byline{color:var(--amber);letter-spacing:.08em}
   .topctl{display:flex;align-items:center;gap:8px;margin-left:auto}
   .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#0c111b}
   .seg button{font-family:var(--disp);background:transparent;color:var(--dim);border:0;padding:8px 12px;cursor:pointer;font-size:12px;letter-spacing:.05em;transition:.15s}
@@ -130,7 +131,8 @@
   @media(max-width:840px){
     #app{grid-template-columns:1fr;grid-template-rows:auto 38vh 1fr 86px}
     #side{grid-row:3;grid-column:1}#view{grid-row:2;grid-column:1}#telem{grid-row:4}
-    .brand small{display:none}
+    .brand .tagsim{display:none}
+    .brand .byline{display:inline}
     #topbar{flex-wrap:wrap;height:auto;min-height:52px;padding:8px 12px;gap:8px}
     .brand{font-size:14px}
     .topctl{margin-left:0;width:100%;flex-wrap:wrap;gap:7px;justify-content:flex-start}
@@ -143,7 +145,7 @@
 <body>
 <div id="app">
   <div id="topbar">
-    <div class="brand"><span class="dot"></span>AeroPlan <small>FLIGHT&nbsp;PLANNER&nbsp;//&nbsp;SIM</small></div>
+    <div class="brand"><span class="dot"></span>AeroPlan <small class="byline">by&nbsp;pezzaliAPP</small> <small class="tagsim">FLIGHT&nbsp;PLANNER&nbsp;//&nbsp;SIM</small></div>
     <div class="topctl">
       <div class="seg" id="simseg">
         <button data-act="play" title="Avvia">▶ SIM</button>
