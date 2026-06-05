@@ -326,6 +326,7 @@
       <button data-cam="chase">CHASE</button>
       <button data-cam="fpv">FPV</button>
       <button id="resetView" title="Torna alla vista Home">↺ Vista</button>
+      <button id="detailView" title="Vista ravvicinata e nitida sul drone">🔍 Dettaglio</button>
     </div>
     <div class="attrib" id="attrib">Imagery © Esri, Maxar, Earthstar Geographics</div>
     <div class="toast" id="toast"></div>
@@ -772,15 +773,15 @@ const BASEMAPS={
   sat:{url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,attr:'Imagery © Esri, Maxar, Earthstar Geographics',rough:1,emissive:0x000000},
   map:{url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${z}/${y}/${x}`,attr:'Map © Esri, HERE, Garmin, OpenStreetMap contributors',rough:1,emissive:0x222222}
 };
-async function loadBasemap(kind){
+async function loadBasemap(kind,extentOverride,frameCloseOn){
   const B=BASEMAPS[kind]; if(!B)return;
   markBaseLoading(kind);
   try{
     const k=2,span=2*k+1,latRad=home.lat*Math.PI/180;
-    // tile zoom adattivo: copri ~1.6x il raggio zone scelto (min ~2.4 km per dettaglio, max ~180 km)
-    const targetExtent=clamp(ZONE_MAXDIST*1.6,2400,180000);
+    // tile zoom adattivo: copertura ~1.6x il raggio zone (o override per "Dettaglio")
+    const targetExtent=clamp(extentOverride||ZONE_MAXDIST*1.6,900,180000);
     let z=Math.round(Math.log2(span*256*156543.03392*Math.cos(latRad)/targetExtent));
-    z=clamp(z,9,17); const n=2**z;
+    z=clamp(z,9,18); const n=2**z;
     const fx=(home.lon+180)/360*n, fy=(1-Math.asinh(Math.tan(latRad))/Math.PI)/2*n;
     const xc=Math.floor(fx),yc=Math.floor(fy),total=span*256;
     const res=156543.03392*Math.cos(latRad)/n;
@@ -811,7 +812,7 @@ async function loadBasemap(kind){
     cam.far=far;fpvCam.far=far;cam.updateProjectionMatrix();fpvCam.updateProjectionMatrix();
     scene.fog = worldSize>6000 ? null : new THREE.FogExp2(0x0a1018,0.0014);
     orbit.maxDist=Math.max(2500,worldSize*1.4);
-    frameHome(worldSize);
+    if(frameCloseOn)frameClose(); else frameHome(worldSize);
     $('attrib').textContent=B.attr;$('attrib').style.display='block';
     currentBase=kind; markBase();
     relocalizeZones();
@@ -990,6 +991,11 @@ function frameHome(worldSize){
   const ws=worldSize||WORLD.size||2400;
   orbit.dist=clamp(ws*0.62,200,orbit.maxDist||2500);
 }
+function frameClose(){
+  camMode='orbit'; document.querySelectorAll('.vbadge button[data-cam]').forEach(x=>x.classList.toggle('active',x.dataset.cam==='orbit'));
+  zoneSel=null; if(allZones.length)buildZones();
+  orbit.tgt.set(0,8,0); orbit.az=0.6; orbit.pol=0.62; orbit.dist=90;
+}
 function focusZone(z){
   let sx=0,sz=0,c=0,minx=1e9,minz=1e9,maxx=-1e9,maxz=-1e9;
   z.polys.forEach(r=>r.forEach(p=>{sx+=p.x;sz+=p.z;c++;minx=Math.min(minx,p.x);maxx=Math.max(maxx,p.x);minz=Math.min(minz,p.z);maxz=Math.max(maxz,p.z);}));
@@ -1079,6 +1085,7 @@ $('simseg').addEventListener('click',e=>{const a=e.target.dataset.act;if(!a)retu
 $('simspeed').addEventListener('change',e=>simSpeed=+e.target.value);
 document.querySelectorAll('.vbadge button[data-cam]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.vbadge button[data-cam]').forEach(x=>x.classList.remove('active'));b.classList.add('active');camMode=b.dataset.cam;}));
 $('resetView').onclick=()=>{ zoneSel=null; if(allZones.length)buildZones(); frameHome(WORLD.size); toast('Vista ripristinata'); };
+$('detailView').onclick=()=>{ if(currentBase&&currentBase!=='proc'){ loadBasemap(currentBase,1200,true); toast('Dettaglio: mappa ad alta risoluzione'); } else { frameClose(); toast('Vista ravvicinata'); } };
 function resetTelem(){['tSpd','tAlt'].forEach(i=>$(i).textContent='0.0');['tHome','tTrav'].forEach(i=>$(i).textContent='0');$('tBat').textContent='100';$('tBatBar').style.width='100%';$('tTime').textContent='00:00';$('tEta').textContent='--:--';$('tBatBox').className='gauge bat';$('hAlt').textContent='0.0';$('hSpd').textContent='0.0';$('hDist').textContent='0';$('hWp').textContent='--';}
 function fmtTime(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(Math.floor(s%60)).padStart(2,'0');}
 

@@ -326,6 +326,7 @@
       <button data-cam="chase">CHASE</button>
       <button data-cam="fpv">FPV</button>
       <button id="resetView" title="Torna alla vista Home">↺ Vista</button>
+      <button id="detailView" title="Vista ravvicinata e nitida sul drone">🔍 Dettaglio</button>
     </div>
     <div class="attrib" id="attrib">Imagery © Esri, Maxar, Earthstar Geographics</div>
     <div class="toast" id="toast"></div>
@@ -538,7 +539,7 @@ function applyOrbit(){const x=orbit.tgt.x+orbit.dist*Math.sin(orbit.pol)*Math.co
 canvas.addEventListener('pointerdown',e=>{if(camMode==='orbit'){orbit.drag=true;orbit.px=e.clientX;orbit.py=e.clientY;}});
 addEventListener('pointerup',()=>orbit.drag=false);
 addEventListener('pointermove',e=>{if(!orbit.drag)return;orbit.az-=(e.clientX-orbit.px)*0.005;orbit.pol=clamp(orbit.pol-(e.clientY-orbit.py)*0.005,0.12,1.45);orbit.px=e.clientX;orbit.py=e.clientY;});
-canvas.addEventListener('wheel',e=>{if(camMode!=='orbit')return;e.preventDefault();orbit.dist=clamp(orbit.dist*(1+Math.sign(e.deltaY)*0.1),30,orbit.maxDist||2500);},{passive:false});
+canvas.addEventListener('wheel',e=>{if(camMode!=='orbit')return;e.preventDefault();orbit.dist=clamp(orbit.dist*(1+Math.sign(e.deltaY)*0.1),50,orbit.maxDist||2500);},{passive:false});
 
 /* raycast click */
 const ray=new THREE.Raycaster(),mouse=new THREE.Vector2();let downPos=null;
@@ -772,15 +773,15 @@ const BASEMAPS={
   sat:{url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,attr:'Imagery © Esri, Maxar, Earthstar Geographics',rough:1,emissive:0x000000},
   map:{url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${z}/${y}/${x}`,attr:'Map © Esri, HERE, Garmin, OpenStreetMap contributors',rough:1,emissive:0x222222}
 };
-async function loadBasemap(kind){
+async function loadBasemap(kind,extentOverride,frameCloseOn){
   const B=BASEMAPS[kind]; if(!B)return;
   markBaseLoading(kind);
   try{
     const k=2,span=2*k+1,latRad=home.lat*Math.PI/180;
-    // tile zoom adattivo: copri ~1.6x il raggio zone scelto (min ~2.4 km per dettaglio, max ~180 km)
-    const targetExtent=clamp(ZONE_MAXDIST*1.6,2400,180000);
+    // tile zoom adattivo: copertura ~1.6x il raggio zone (o override per "Dettaglio")
+    const targetExtent=clamp(extentOverride||ZONE_MAXDIST*1.6,900,180000);
     let z=Math.round(Math.log2(span*256*156543.03392*Math.cos(latRad)/targetExtent));
-    z=clamp(z,9,17); const n=2**z;
+    z=clamp(z,9,18); const n=2**z;
     const fx=(home.lon+180)/360*n, fy=(1-Math.asinh(Math.tan(latRad))/Math.PI)/2*n;
     const xc=Math.floor(fx),yc=Math.floor(fy),total=span*256;
     const res=156543.03392*Math.cos(latRad)/n;
@@ -811,7 +812,7 @@ async function loadBasemap(kind){
     cam.far=far;fpvCam.far=far;cam.updateProjectionMatrix();fpvCam.updateProjectionMatrix();
     scene.fog = worldSize>6000 ? null : new THREE.FogExp2(0x0a1018,0.0014);
     orbit.maxDist=Math.max(2500,worldSize*1.4);
-    frameHome(worldSize);
+    if(frameCloseOn)frameClose(); else frameHome(worldSize);
     $('attrib').textContent=B.attr;$('attrib').style.display='block';
     currentBase=kind; markBase();
     relocalizeZones();
@@ -971,11 +972,13 @@ function buildZones(){
     const sel=(z.name===zoneSel);
     z.polys.forEach(ring=>{
       const shape=new THREE.Shape(ring.map(p=>new THREE.Vector2(p.x,-p.z)));
-      const fill=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:z.color,transparent:true,opacity:sel?0.34:0.16,side:THREE.DoubleSide,depthWrite:false}));
-      fill.rotation.x=-Math.PI/2; fill.position.y=sel?0.6:0.4; zoneGroup.add(fill);
-      const pts=ring.map(p=>new THREE.Vector3(p.x,sel?0.8:0.5,p.z)); pts.push(pts[0]);
+      // height band kept tight & low (0.28–0.5) so the overlay stays "glued" to the
+      // basemap plane (y=0.05) and doesn't visibly float/parallax at oblique zoom
+      const fill=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:z.color,transparent:true,opacity:sel?0.22:0.14,side:THREE.DoubleSide,depthWrite:false}));
+      fill.rotation.x=-Math.PI/2; fill.position.y=sel?0.32:0.28; fill.userData.isZoneFill=true; fill.renderOrder=1; zoneGroup.add(fill);
+      const pts=ring.map(p=>new THREE.Vector3(p.x,sel?0.46:0.34,p.z)); pts.push(pts[0]);
       zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:sel?0xffffff:z.color})));
-      if(sel){ const pts2=ring.map(p=>new THREE.Vector3(p.x,0.82,p.z)); pts2.push(pts2[0]); zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2),new THREE.LineBasicMaterial({color:z.color}))); }
+      if(sel){ const pts2=ring.map(p=>new THREE.Vector3(p.x,0.5,p.z)); pts2.push(pts2[0]); zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2),new THREE.LineBasicMaterial({color:z.color}))); }
     });
   });
   zoneGroup.visible=$('zoneToggle').checked;
@@ -987,6 +990,11 @@ function frameHome(worldSize){
   orbit.tgt.set(0,0,0); orbit.az=0; orbit.pol=0.30;
   const ws=worldSize||WORLD.size||2400;
   orbit.dist=clamp(ws*0.62,200,orbit.maxDist||2500);
+}
+function frameClose(){
+  camMode='orbit'; document.querySelectorAll('.vbadge button[data-cam]').forEach(x=>x.classList.toggle('active',x.dataset.cam==='orbit'));
+  zoneSel=null; if(allZones.length)buildZones();
+  orbit.tgt.set(0,8,0); orbit.az=0.6; orbit.pol=0.62; orbit.dist=90;
 }
 function focusZone(z){
   let sx=0,sz=0,c=0,minx=1e9,minz=1e9,maxx=-1e9,maxz=-1e9;
@@ -1077,6 +1085,7 @@ $('simseg').addEventListener('click',e=>{const a=e.target.dataset.act;if(!a)retu
 $('simspeed').addEventListener('change',e=>simSpeed=+e.target.value);
 document.querySelectorAll('.vbadge button[data-cam]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.vbadge button[data-cam]').forEach(x=>x.classList.remove('active'));b.classList.add('active');camMode=b.dataset.cam;}));
 $('resetView').onclick=()=>{ zoneSel=null; if(allZones.length)buildZones(); frameHome(WORLD.size); toast('Vista ripristinata'); };
+$('detailView').onclick=()=>{ if(currentBase&&currentBase!=='proc'){ loadBasemap(currentBase,1200,true); toast('Dettaglio: mappa ad alta risoluzione'); } else { frameClose(); toast('Vista ravvicinata'); } };
 function resetTelem(){['tSpd','tAlt'].forEach(i=>$(i).textContent='0.0');['tHome','tTrav'].forEach(i=>$(i).textContent='0');$('tBat').textContent='100';$('tBatBar').style.width='100%';$('tTime').textContent='00:00';$('tEta').textContent='--:--';$('tBatBox').className='gauge bat';$('hAlt').textContent='0.0';$('hSpd').textContent='0.0';$('hDist').textContent='0';$('hWp').textContent='--';}
 function fmtTime(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(Math.floor(s%60)).padStart(2,'0');}
 
@@ -1109,6 +1118,9 @@ function loop(now){
   }
   let activeCam=cam;
   if(camMode==='orbit')applyOrbit();
+  // when zoomed in close, drop the translucent zone fills (keep only the borders) so a
+  // selected zone doesn't flood the screen as a dark mass over the basemap/terrain
+  if(zoneGroup.visible){const zClose=(camMode==='orbit'&&orbit.dist<140);for(const ch of zoneGroup.children){if(ch.userData.isZoneFill)ch.visible=!zClose;}}
   else if(camMode==='chase'){const back=new THREE.Vector3(0,4,-16).applyQuaternion(drone.quaternion).add(drone.position);cam.position.lerp(back,0.12);cam.lookAt(drone.position.x,drone.position.y+2,drone.position.z);}
   else if(camMode==='fpv'){fpvCam.position.copy(drone.position);const look=new THREE.Vector3(0,0,10).applyQuaternion(drone.quaternion).add(drone.position);look.y-=Math.tan(drone.userData.gimbal.rotation.x)*10;fpvCam.up.set(0,1,0);fpvCam.lookAt(look);activeCam=fpvCam;}
   $('needle').style.transform=`translate(-50%,-100%) rotate(${-drone.rotation.y*180/Math.PI}deg)`;
