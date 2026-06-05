@@ -719,10 +719,10 @@ function renderWpList(){
   waypoints.forEach((w,i)=>{
     const g=toGPS(w.x,w.z), tagcls=w.kind==='orbit'?' poi-wp':w.kind==='survey'?' survey-wp':w.kind==='corridor'?' corridor-wp':'';
     const kindlbl=w.kind==='orbit'?'Orbita':w.kind==='survey'?'Mappa':w.kind==='corridor'?'Corridoio':'Waypoint';
-    const el=document.createElement('div');el.className='wp'+(i===selected?' sel':'')+tagcls+(w._zone?' zoneconflict':'');
+    const el=document.createElement('div');el.className='wp'+(i===selected?' sel':'')+tagcls+((w._zone||w._altViol)?' zoneconflict':'');
     el.innerHTML=`<div class="h"><div class="idx"><span class="num">${i+1}</span> ${kindlbl}</div><span class="x" data-del="${i}">✕</span></div>
       <div class="meta"><span>⛰ ${w.alt}m</span><span>➤ ${w.speed}m/s</span><span>↻ ${w.head}°</span><span>📷 ${w.gimbal}° ${w.action}</span></div>
-      <div class="meta"><span style="color:var(--faint)">${g.lat.toFixed(6)}, ${g.lon.toFixed(6)}${w.headingMode==='towardPOI'?' · POI-lock':''}</span>${w._zone?`<span style="color:#${restrInfo(w._zone.restriction).color.toString(16).padStart(6,'0')}">⚠ ${restrInfo(w._zone.restriction).word} · ${w._zone.name}</span>`:''}</div>
+      <div class="meta"><span style="color:var(--faint)">${g.lat.toFixed(6)}, ${g.lon.toFixed(6)}${w.headingMode==='towardPOI'?' · POI-lock':''}</span>${w._zone?`<span style="color:#${restrInfo(w._zone.restriction).color.toString(16).padStart(6,'0')}">⚠ ${restrInfo(w._zone.restriction).word} · ${w._zone.name}</span>`:''}${w._altViol?`<span style="color:var(--amber)">⚠ quota ${w.alt}m &gt; max ${Math.round(w._altViol.max)}m zona</span>`:''}</div>
       <div class="wp-edit">
         <div class="row2"><div class="field"><label>Quota <b>${w.alt}m</b></label><input type="range" min="5" max="${cfg.aMax}" value="${w.alt}" data-f="alt" data-i="${i}"></div>
           <div class="field"><label>Velocità <b>${w.speed}</b></label><input type="range" min="1" max="${cfg.vMax}" value="${w.speed}" data-f="speed" data-i="${i}"></div></div>
@@ -1124,14 +1124,19 @@ function renderZoneList(){
 function pointInPoly(x,z,ring){let inside=false;for(let i=0,j=ring.length-1;i<ring.length;j=i++){const xi=ring[i].x,zi=ring[i].z,xj=ring[j].x,zj=ring[j].z;if(((zi>z)!=(zj>z))&&(x<(xj-xi)*(z-zi)/(zj-zi)+xi))inside=!inside;}return inside;}
 function relocalizeZones(){if(!allZones.length)return;selectNearby();}
 function checkZones(){
-  let nViet=0,nAuth=0,nOther=0;
-  waypoints.forEach(w=>{ w._zone=null;
+  let nViet=0,nAuth=0,nOther=0,nAlt=0;
+  waypoints.forEach(w=>{ w._zone=null; w._altViol=null;
     if(!dfZones.length)return;
+    let restrHit=null, minUpper=null, minUpperZone=null;
     for(const z of dfZones){
-      if(/NO_RESTRICTION|^$/.test((z.restriction||'').toUpperCase()))continue;
-      let hit=false; for(const ring of z.polys){ if(pointInPoly(w.x,w.z,ring)){ hit=true; break; } }
-      if(hit){ w._zone=z; const word=restrInfo(z.restriction).word; if(word==='VIETATO')nViet++; else if(word==='AUTORIZZAZIONE')nAuth++; else nOther++; break; }
+      let inside=false; for(const ring of z.polys){ if(pointInPoly(w.x,w.z,ring)){ inside=true; break; } }
+      if(!inside)continue;
+      // B8 — quota: tieni la zona con il limite verticale più basso tra quelle che contengono il waypoint
+      const um=zoneUpperM(z); if(um!=null&&(minUpper==null||um<minUpper)){minUpper=um;minUpperZone=z;}
+      if(!restrHit&&!/NO_RESTRICTION|^$/.test((z.restriction||'').toUpperCase())) restrHit=z;
     }
+    if(restrHit){ w._zone=restrHit; const word=restrInfo(restrHit.restriction).word; if(word==='VIETATO')nViet++; else if(word==='AUTORIZZAZIONE')nAuth++; else nOther++; }
+    if(minUpper!=null&&w.alt>minUpper+0.5){ w._altViol={max:minUpper,name:(minUpperZone&&minUpperZone.name)||''}; nAlt++; }
   });
   // controllo del punto di DECOLLO (Home = origine locale 0,0)
   let homeZone=null;
@@ -1147,7 +1152,7 @@ function checkZones(){
     if(homeZone){ const ri=restrInfo(homeZone.restriction), hx='#'+ri.color.toString(16).padStart(6,'0');
       html+=`📍 <b style="color:${hx}">Decollo in zona ${ri.word}</b> — ${homeZone.name} (${ri.note}).<br>`;
     } else html+=`📍 <b style="color:var(--green)">Decollo: nessuna zona con restrizioni</b> tra quelle caricate.<br>`;
-    if(tot){ const parts=[]; if(nViet)parts.push(`<b style="color:var(--red)">${nViet} in zona VIETATA</b>`); if(nAuth)parts.push(`<b style="color:var(--amber)">${nAuth} richiede autorizzazione</b>`); if(nOther)parts.push(`${nOther} con condizioni`);
+    if(tot||nAlt){ const parts=[]; if(nViet)parts.push(`<b style="color:var(--red)">${nViet} in zona VIETATA</b>`); if(nAuth)parts.push(`<b style="color:var(--amber)">${nAuth} richiede autorizzazione</b>`); if(nOther)parts.push(`${nOther} con condizioni`); if(nAlt)parts.push(`<b style="color:var(--amber)">${nAlt} oltre la quota di zona</b>`);
       html+='⚠ Waypoint: '+parts.join(' · ')+'.';
     } else if(waypoints.length) html+=`✓ Waypoint: nessuno in zona.`;
     html+=' <span style="color:var(--faint)">Verifica su d-flight.it.</span>';
