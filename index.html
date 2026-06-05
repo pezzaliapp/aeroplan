@@ -203,7 +203,7 @@
         </div>
         <div class="row2">
           <div class="field"><label>Quota suolo (m)</label><input type="number" id="homeAlt" step="1" value="120"></div>
-          <div class="field"><label>Cerca città / coord.</label><input type="text" id="geoSearch" placeholder="es. Roma · 46.11 11.31"></div>
+          <div class="field"><label>Cerca luogo / coord. <b id="geoStatus" style="display:none">ricerca…</b></label><input type="text" id="geoSearch" placeholder="es. Parma · via Roma · 46.11 11.31"></div>
         </div>
         <button class="btn" id="geoBtn" style="width:100%;justify-content:center;margin-bottom:8px">📍 Mia posizione</button>
         <div class="seg" id="baseSeg" style="width:100%;margin-bottom:8px">
@@ -635,11 +635,44 @@ const CITIES={
   'udine':[46.0711,13.2346],'urbino':[43.7262,12.6365],'varese':[45.8206,8.8251],'venezia':[45.4408,12.3155],'verbania':[45.9213,8.5519],'vercelli':[45.3201,8.4185],'verona':[45.4384,10.9916],'vibo valentia':[38.6759,16.1003],'vicenza':[45.5455,11.5354],'viterbo':[42.4175,12.1057],
   // alcune città estere di riferimento
   'parigi':[48.8566,2.3522],'londra':[51.5074,-0.1278],'new york':[40.7128,-74.006],'tokyo':[35.6762,139.6503]};
-$('geoSearch').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const q=e.target.value.trim().toLowerCase();
-  // accetta coordinate "lat, lon" (o "lat lon") oltre alle città in elenco — nessun geocoding esterno
+/* ===================== RICERCA LUOGO — geocoding OSM/Nominatim (riscritto) =====================
+   • "lat, lon" → usato direttamente, niente rete (parser invariato).
+   • capoluoghi comuni → cache CITIES (istantanea, offline).
+   • tutto il resto → Nominatim (1 risultato), max 1 req/s, non bloccante, in try/catch.
+   • fallback morbido se offline / 0 risultati. Nessuna chiave API.                                */
+let geoBusy=false, lastGeoT=0;
+function geoStatus(on){const s=$('geoStatus'); if(s)s.style.display=on?'inline':'none';}
+async function geocodeAndGo(raw){
+  const q=(raw||'').trim(); if(!q)return;
+  // 1) coordinate dirette "lat, lon" / "lat lon"
   const m=q.match(/^(-?\d+(?:\.\d+)?)[ ,]+(-?\d+(?:\.\d+)?)$/);
-  if(m){const la=+m[1],lo=+m[2];if(Math.abs(la)<=90&&Math.abs(lo)<=180){setHome(la,lo);toast('Home → '+la.toFixed(5)+', '+lo.toFixed(5));}else toast('Coordinate fuori range');return;}
-  if(CITIES[q]){setHome(CITIES[q][0],CITIES[q][1]);toast('Home → '+e.target.value);}else toast('Città non in elenco — oppure digita "lat, lon"');});
+  if(m){const la=+m[1],lo=+m[2]; if(Math.abs(la)<=90&&Math.abs(lo)<=180){setHome(la,lo);toast('Home → '+la.toFixed(5)+', '+lo.toFixed(5));}else toast('Coordinate fuori range'); return;}
+  // 2) cache capoluoghi
+  const key=q.toLowerCase();
+  if(CITIES[key]){setHome(CITIES[key][0],CITIES[key][1]);toast('Home → '+q);return;}
+  // 3) Nominatim
+  if(geoBusy)return;
+  geoBusy=true; geoStatus(true);
+  try{
+    const wait=Math.max(0,1000-(Date.now()-lastGeoT));   // max 1 richiesta/secondo
+    if(wait)await new Promise(r=>setTimeout(r,wait));
+    lastGeoT=Date.now();
+    const url='https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q);
+    // NB: User-Agent/Referer sono impostati automaticamente dal browser (header forbidden via fetch);
+    // identifica l'app AeroPlan e rispetta la usage policy Nominatim per uso a basso volume.
+    const res=await fetch(url,{headers:{'Accept':'application/json','User-Agent':'AeroPlan/1.x (https://www.alessandropezzali.it/aeroplan/)'}});
+    if(!res.ok)throw new Error('http '+res.status);
+    const arr=await res.json();
+    if(!Array.isArray(arr)||!arr.length){toast("Luogo non trovato — prova con 'lat, lon'");return;}
+    const la=+arr[0].lat, lo=+arr[0].lon;
+    if(!isFinite(la)||!isFinite(lo)){toast("Luogo non trovato — prova con 'lat, lon'");return;}
+    setHome(la,lo);
+    toast('Home → '+(arr[0].display_name?arr[0].display_name.split(',')[0]:q));
+  }catch(err){ toast("Luogo non trovato — prova con 'lat, lon'"); }
+  finally{ geoBusy=false; geoStatus(false); }
+}
+$('geoSearch').addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault();geocodeAndGo(e.target.value);} });
+$('geoSearch').addEventListener('blur',e=>{ if(e.target.value.trim())geocodeAndGo(e.target.value); });
 
 /* tool buttons */
 document.querySelectorAll('.toolbtn').forEach(b=>b.onclick=()=>{tool=b.dataset.tool;document.querySelectorAll('.toolbtn').forEach(x=>x.classList.toggle('sel',x===b));const tm=$('toolmode');if(tool==='poi'){tm.style.display='block';tm.textContent='🎯 Clicca per posizionare il POI';}else if(tool==='corridor'){tm.style.display='block';tm.textContent='🛣 Clicca per tracciare il percorso del corridoio';}else{tm.style.display='none';}});
@@ -804,119 +837,117 @@ $('geoBtn').onclick=async ()=>{
     toast(err.code===3?'GPS: timeout':'Posizione non disponibile');
   },{enableHighAccuracy:true,timeout:15000,maximumAge:60000});
 };
-function removeSatellite(){
-  if(satPlane){scene.remove(satPlane);satPlane.geometry.dispose();satPlane.material.map?.dispose();satPlane.material.dispose();satPlane=null;}
-  if(satUnderlay)satUnderlay.visible=false;
-  terrain.visible=true;grid.visible=true;proceduralGroup.visible=true;groundMesh=terrain;WORLD.size=2400;
-  // ripristina la scena locale
-  cam.far=8000;fpvCam.far=8000;cam.updateProjectionMatrix();fpvCam.updateProjectionMatrix();
-  scene.fog=new THREE.FogExp2(0x0a1018,0.0014);
-  orbit.maxDist=2500; orbit.dist=Math.min(orbit.dist,2500);
-  lastLoadedZ=null;   // reset LOD: la prossima base satellite ricalcola lo zoom
-  $('attrib').style.display='none';
-  relocalizeZones();
-}
 const BASEMAPS={
-  sat:{url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,attr:'Imagery © Esri, Maxar, Earthstar Geographics',rough:1,emissive:0x000000},
-  map:{url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${z}/${y}/${x}`,attr:'Map © Esri, HERE, Garmin, OpenStreetMap contributors',rough:1,emissive:0x222222}
+  sat:{url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,attr:'Imagery © Esri, Maxar, Earthstar Geographics'},
+  map:{url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${z}/${y}/${x}`,attr:'Map © Esri, HERE, Garmin, OpenStreetMap contributors'}
 };
-/* ===== LOD dinamico: ricarico i tile reali a una risoluzione adatta alla distanza camera ===== */
-let lodTimer=null, lastLoadedZ=null, loadedCenter={x:0,z:0}, loadedWorld=2400;
-let satUnderlay=null;
-const SPAN_TILES=5;   // mosaico 5×5 (k=2)
-// Fix 2 — piano scuro neutro molto ampio sotto il mosaico: riempie il viewport oltre il bordo dei tile (niente vuoto nero / bordo netto)
-function ensureUnderlay(worldSize){
-  const size=Math.max(worldSize*8,400000);
-  if(!satUnderlay){
-    const g=new THREE.PlaneGeometry(1,1); g.rotateX(-Math.PI/2);
-    satUnderlay=new THREE.Mesh(g,new THREE.MeshBasicMaterial({color:0x0b1018}));
-    satUnderlay.renderOrder=-1; scene.add(satUnderlay);
-  }
-  satUnderlay.scale.set(size,1,size); satUnderlay.position.set(0,0.02,0); satUnderlay.visible=true;
-}
+/* ===================== BASE MAPPA (layer di rendering — riscritto pulito) =====================
+   • Un SINGOLO piano texturizzato = mosaico 5×5 tile, centrato sul punto inquadrato.
+   • Oltre i tile lo sfondo è un colore scuro neutro UNIFORME (scene.background): niente piani
+     giganti che z-fightano (→ niente "schegge"), niente bordo nero netto, niente vuoto.
+   • LOD: su zoom/pan ricarico a uno zoom adeguato; la nuova texture entra in scena SOLO quando
+     è completamente caricata (il piano precedente resta finché il nuovo non è pronto).
+   • loadGen: un token monotòno serializza i caricamenti async → mai due piani sovrapposti.        */
+const SPAN_TILES=5, TILE_K=2;                 // mosaico 5×5
+const NEUTRAL_BG=new THREE.Color(0x0b1018);   // sfondo neutro in modalità satellite/mappa
+const skyBg=scene.background;                  // cielo procedurale (gradient) da ripristinare in 'proc'
+let lodTimer=null, loadGen=0;
+let lastLoadedZ=null, loadedCenter={x:0,z:0}, loadedWorld=2400;
+
 function desiredTileZ(extent){
   const latRad=home.lat*Math.PI/180;
-  let z=Math.round(Math.log2(SPAN_TILES*256*156543.03392*Math.cos(latRad)/clamp(extent,900,180000)));
+  const z=Math.round(Math.log2(SPAN_TILES*256*156543.03392*Math.cos(latRad)/clamp(extent,900,180000)));
   return clamp(z,9,20);
 }
-// chiamata su zoom/spostamento: se serve più dettaglio (o ci si è spostati), ricarica i tile mantenendo la vista
+// su zoom/pan: se serve più dettaglio (o ci si è spostati) ricarica i tile mantenendo la vista
 function scheduleLOD(){
   if(currentBase==='proc'||!satPlane)return;
   clearTimeout(lodTimer);
   lodTimer=setTimeout(()=>{
     if(currentBase==='proc'||!satPlane||camMode!=='orbit')return;
-    const extent=orbit.dist*2.0;
-    const z=desiredTileZ(extent);
+    const extent=orbit.dist*2.0, z=desiredTileZ(extent);
     const moved=Math.hypot(orbit.tgt.x-loadedCenter.x,orbit.tgt.z-loadedCenter.z);
-    if(z!==lastLoadedZ || moved>loadedWorld*0.3){
-      loadBasemap(currentBase,extent,false,true,{x:orbit.tgt.x,z:orbit.tgt.z});
-    }
+    if(z!==lastLoadedZ||moved>loadedWorld*0.3) loadBasemap(currentBase,extent,false,true,{x:orbit.tgt.x,z:orbit.tgt.z});
   },360);
+}
+function removeSatellite(){
+  loadGen++;                                   // annulla eventuali caricamenti in corso
+  if(satPlane){scene.remove(satPlane);satPlane.geometry.dispose();satPlane.material.map?.dispose();satPlane.material.dispose();satPlane=null;}
+  scene.background=skyBg;                       // ripristina il cielo procedurale
+  terrain.visible=true;grid.visible=true;proceduralGroup.visible=true;groundMesh=terrain;WORLD.size=2400;
+  cam.far=8000;fpvCam.far=8000;cam.updateProjectionMatrix();fpvCam.updateProjectionMatrix();
+  scene.fog=new THREE.FogExp2(0x0a1018,0.0014);
+  orbit.maxDist=2500; orbit.dist=Math.min(orbit.dist,2500);
+  lastLoadedZ=null;
+  $('attrib').style.display='none';
+  relocalizeZones();
+}
+// scarica il mosaico in un canvas e risolve SOLO quando tutti i tile sono pronti (o al timeout)
+function fetchMosaic(B,z,xc,yc,k,total){
+  return new Promise(resolve=>{
+    const cnv=document.createElement('canvas');cnv.width=total;cnv.height=total;
+    const ctx=cnv.getContext('2d');ctx.fillStyle='#0b1018';ctx.fillRect(0,0,total,total);
+    const n=(2*k+1)*(2*k+1); let ok=0,done=0,finished=false;
+    const finish=()=>{if(finished)return;finished=true;clearTimeout(to);resolve({cnv,ok});};
+    const to=setTimeout(finish,9000);
+    for(let i=-k;i<=k;i++)for(let j=-k;j<=k;j++){
+      const img=new Image();img.crossOrigin='anonymous';
+      const tick=draw=>{if(finished)return;if(draw){try{ctx.drawImage(img,(i+k)*256,(j+k)*256);ok++;}catch(e){}}if(++done===n)finish();};
+      img.onload=()=>tick(true); img.onerror=()=>tick(false);
+      img.src=B.url(z,xc+i,yc+j);
+    }
+  });
 }
 async function loadBasemap(kind,extentOverride,frameCloseOn,keepView,centerLocal){
   const B=BASEMAPS[kind]; if(!B)return;
+  const gen=++loadGen;                          // identifica questo caricamento
   markBaseLoading(kind);
   try{
-    const k=2,span=2*k+1;
-    // centro del mosaico: Home (default) o il punto inquadrato (per il LOD su zoom/pan)
+    const k=TILE_K,total=(2*k+1)*256;
     const ctr=centerLocal||{x:0,z:0};
     const cgeo=(ctr.x||ctr.z)?toGPS(ctr.x,ctr.z):{lat:home.lat,lon:home.lon};
     const latRad=cgeo.lat*Math.PI/180;
-    // tile zoom adattivo: copertura ~1.6x il raggio zone, oppure legato alla distanza camera (LOD)
     const targetExtent=clamp(extentOverride||ZONE_MAXDIST*1.6,900,180000);
-    let z=Math.round(Math.log2(span*256*156543.03392*Math.cos(latRad)/targetExtent));
-    z=clamp(z,9,20); const n=2**z;
-    const fx=(cgeo.lon+180)/360*n, fy=(1-Math.asinh(Math.tan(latRad))/Math.PI)/2*n;
-    const xc=Math.floor(fx),yc=Math.floor(fy),total=span*256;
-    const res=156543.03392*Math.cos(latRad)/n;
-    const cnv=document.createElement('canvas');cnv.width=total;cnv.height=total;
-    const ctx=cnv.getContext('2d');ctx.fillStyle='#13202b';ctx.fillRect(0,0,total,total);
-    let ok=0; const jobs=[];
-    for(let i=-k;i<=k;i++)for(let j=-k;j<=k;j++){
-      const tx=xc+i,ty=yc+j;
-      const url=B.url(z,tx,ty);
-      jobs.push(new Promise(r=>{const img=new Image();img.crossOrigin='anonymous';
-        img.onload=()=>{try{ctx.drawImage(img,(i+k)*256,(j+k)*256);ok++;}catch(e){}r();};
-        img.onerror=()=>r(); img.src=url;}));
-    }
-    await Promise.race([Promise.all(jobs),new Promise(r=>setTimeout(r,9000))]);
+    let z=Math.round(Math.log2((2*k+1)*256*156543.03392*Math.cos(latRad)/targetExtent));
+    z=clamp(z,9,20); const nT=2**z;
+    const fx=(cgeo.lon+180)/360*nT, fy=(1-Math.asinh(Math.tan(latRad))/Math.PI)/2*nT;
+    const xc=Math.floor(fx),yc=Math.floor(fy);
+    const res=156543.03392*Math.cos(latRad)/nT;
+    const {cnv,ok}=await fetchMosaic(B,z,xc,yc,k,total);
+    if(gen!==loadGen)return;                      // un caricamento più recente ha già vinto → scarta
     if(ok===0)throw new Error('nessun tile (rete bloccata)');
     const tex=new THREE.CanvasTexture(cnv); tex.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||4;
-    tex.minFilter=THREE.LinearFilter; tex.generateMipmaps=false;   // niente mipmap = massima nitidezza in primo piano (e PoT-safe)
+    tex.minFilter=THREE.LinearFilter; tex.generateMipmaps=false;   // nitido in primo piano, PoT-safe
     const worldSize=total*res;
-    // posiziona il piano così che il punto geografico centrale cada esattamente sulle sue coord locali
-    const cl=fromGPS(cgeo.lat,cgeo.lon);
+    const cl=fromGPS(cgeo.lat,cgeo.lon);          // ≈ ctr; posiziona il centro geografico sulle sue coord locali
     const cpx=(fx-(xc-k))*256, cpy=(fy-(yc-k))*256;
-    // Fix 4 — niente flash sfocato: costruisci e aggiungi il NUOVO piano prima di rimuovere il vecchio
     const geo=new THREE.PlaneGeometry(worldSize,worldSize);geo.rotateX(-Math.PI/2);
-    const mat = kind==='map' ? new THREE.MeshBasicMaterial({map:tex}) : new THREE.MeshStandardMaterial({map:tex,roughness:1});
-    const newPlane=new THREE.Mesh(geo,mat);
-    newPlane.position.set(cl.x-(cpx-total/2)*res,0.05,cl.z-(cpy-total/2)*res); newPlane.receiveShadow=(kind!=='map'); scene.add(newPlane);
-    const oldPlane=satPlane; satPlane=newPlane;
-    if(oldPlane){scene.remove(oldPlane);oldPlane.material.map?.dispose();oldPlane.geometry.dispose();oldPlane.material.dispose();}
-    ensureUnderlay(worldSize);   // Fix 2 — sfondo neutro sempre presente sotto/oltre il mosaico
+    const mat=kind==='map'?new THREE.MeshBasicMaterial({map:tex}):new THREE.MeshStandardMaterial({map:tex,roughness:1});
+    const np=new THREE.Mesh(geo,mat);
+    np.position.set(cl.x-(cpx-total/2)*res,0.05,cl.z-(cpy-total/2)*res); np.receiveShadow=(kind!=='map'); scene.add(np);
+    const old=satPlane; satPlane=np;             // swap: nuovo già in scena, poi rimuovo il vecchio
+    if(old){scene.remove(old);old.material.map?.dispose();old.geometry.dispose();old.material.dispose();}
+    scene.background=NEUTRAL_BG;
     terrain.visible=false;grid.visible=false;proceduralGroup.visible=false;groundMesh=satPlane;
     lastLoadedZ=z; loadedCenter={x:ctr.x,z:ctr.z}; loadedWorld=worldSize;
     if(!keepView){
       WORLD.size=worldSize;
-      // adatta camera/fog/zoom-out all'estensione del mondo, così le zone lontane sono visibili
-      const far=Math.max(8000,worldSize*4);
+      const far=Math.max(8000,worldSize*3);
       cam.far=far;fpvCam.far=far;cam.updateProjectionMatrix();fpvCam.updateProjectionMatrix();
-      scene.fog = worldSize>6000 ? null : new THREE.FogExp2(0x0a1018,0.0014);
+      // fog leggero dello stesso colore dello sfondo → il bordo del mosaico sfuma nel neutro (mai netto)
+      scene.fog=new THREE.FogExp2(0x0b1018,0.45/Math.max(worldSize,2000));
       orbit.maxDist=Math.max(2500,worldSize*1.4);
       if(frameCloseOn)frameClose(); else frameHome(worldSize);
     } else {
-      // ricarico LOD: non toccare la camera, non rimpicciolire il far plane
-      const far=Math.max(cam.far,8000,worldSize*4);
+      const far=Math.max(cam.far,8000,worldSize*3);
       cam.far=far;fpvCam.far=far;cam.updateProjectionMatrix();fpvCam.updateProjectionMatrix();
     }
     $('attrib').textContent=B.attr;$('attrib').style.display='block';
     currentBase=kind; markBase();
     relocalizeZones();
-    if(!keepView)toast((kind==='sat'?'Satellite':'Mappa')+' caricata ('+ok+'/'+(span*span)+' tile)');
+    if(!keepView)toast((kind==='sat'?'Satellite':'Mappa')+' caricata ('+ok+'/'+((2*k+1)*(2*k+1))+' tile)');
   }catch(err){
-    if(!keepView)toast((kind==='sat'?'Satellite':'Mappa')+' non disponibile — '+err.message);
-    markBase();
+    if(gen===loadGen){ if(!keepView)toast((kind==='sat'?'Satellite':'Mappa')+' non disponibile — '+err.message); markBase(); }
   }
 }
 function markBaseLoading(kind){document.querySelectorAll('#baseSeg button').forEach(b=>{b.classList.toggle('active',b.dataset.base===kind);});}
@@ -1153,27 +1184,42 @@ function selectNearby(){
   });
   buildZones(); checkZones(); renderWpList();
 }
+// rimuove vertici duplicati consecutivi e l'eventuale punto di chiusura (first==last):
+// indispensabile per una triangolazione corretta di THREE.Shape (niente "strisce"/schegge)
+function cleanRing(ring){
+  const out=[];
+  for(let i=0;i<ring.length;i++){const p=ring[i],q=out[out.length-1];if(!q||Math.abs(q.x-p.x)>1e-4||Math.abs(q.z-p.z)>1e-4)out.push(p);}
+  if(out.length>2){const a=out[0],b=out[out.length-1];if(Math.abs(a.x-b.x)<1e-4&&Math.abs(a.z-b.z)<1e-4)out.pop();}
+  return out;
+}
+/* ===================== ZONE D-FLIGHT (layer di rendering — riscritto pulito) =====================
+   • FILL: ShapeGeometry con holes (donut), triangolazione corretta su anelli ripuliti.
+   • Tutti i materiali depthWrite:false → la mappa è l'unico writer di profondità: niente z-fighting
+     tra zone e mappa né tra zone sovrapposte; l'ordine è dato da renderOrder.
+   • Opacità BASSA (0.15–0.22): molte zone sovrapposte restano leggibili, mai nere/opache.
+   • Bordo pieno colorato (tratteggiato se dinamica/pericolo/non attiva); cerchi CTR = anelli leggibili. */
 function buildZones(){
-  while(zoneGroup.children.length)zoneGroup.remove(zoneGroup.children[0]);
+  while(zoneGroup.children.length){const c=zoneGroup.children[0];zoneGroup.remove(c);c.geometry&&c.geometry.dispose();c.material&&c.material.dispose();}
   dfZones.forEach(z=>{
     const sel=(z.name===zoneSel);
-    const active=isZoneActiveNow(z);                       // B6
-    const danger=!!restrInfo(z.restriction).danger;        // B5 — area pericolosa
-    const bcol=sel?0xffffff:(active?z.color:0x5a6678);     // zone non attive ora ⇒ grigie
+    const active=isZoneActiveNow(z);
+    const danger=!!restrInfo(z.restriction).danger;
+    const bcol=sel?0xffffff:(active?z.color:0x5a6678);          // non attiva ⇒ grigia
+    const fillOp=active?(sel?0.22:0.16):0.06;
+    const dashed=(z.dynamic||danger||!active);
     z.polys.forEach(poly=>{
-      const shape=new THREE.Shape(poly.outer.map(p=>new THREE.Vector2(p.x,-p.z)));
-      poly.holes.forEach(h=>{ shape.holes.push(new THREE.Path(h.map(p=>new THREE.Vector2(p.x,-p.z)))); }); // B12 — sottrai i buchi dal fill
-      // B4 — overlay tenuto bassissimo (≈0.08) vicino al piano basemap (y=0.05); il polygonOffset
-      // evita lo z-fighting senza alzare fisicamente le zone, così restano "incollate" anche a 45°
-      const fill=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:z.color,transparent:true,opacity:active?(sel?0.22:0.14):0.05,side:THREE.DoubleSide,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
-      fill.rotation.x=-Math.PI/2; fill.position.y=sel?0.10:0.08; fill.userData.isZoneFill=true; fill.renderOrder=1; zoneGroup.add(fill);
-      // bordi: anello esterno + eventuali buchi
-      [poly.outer,...poly.holes].forEach(ring=>{
-        const pts=ring.map(p=>new THREE.Vector3(p.x,sel?0.13:0.11,p.z)); pts.push(pts[0]);
-        // bordo tratteggiato per zone dinamiche (NOTAM/NFZ) o non attive; pieno per le statiche
-        const lmat=(z.dynamic||danger||!active)?new THREE.LineDashedMaterial({color:bcol,dashSize:8,gapSize:5}):new THREE.LineBasicMaterial({color:bcol});
+      const outer=cleanRing(poly.outer); if(outer.length<3)return;
+      const shape=new THREE.Shape(outer.map(p=>new THREE.Vector2(p.x,-p.z)));
+      const holes=[];
+      poly.holes.forEach(h=>{const hr=cleanRing(h); if(hr.length>=3){holes.push(hr); shape.holes.push(new THREE.Path(hr.map(p=>new THREE.Vector2(p.x,-p.z))));}});
+      // FILL — semitrasparente, non scrive profondità (no z-fight, blending pulito anche sovrapposto)
+      const fill=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:z.color,transparent:true,opacity:fillOp,side:THREE.DoubleSide,depthWrite:false}));
+      fill.rotation.x=-Math.PI/2; fill.position.y=0.06; fill.userData.isZoneFill=true; fill.renderOrder=1; zoneGroup.add(fill);
+      // BORDI — anello esterno + buchi, sopra il fill
+      [outer,...holes].forEach(ring=>{
+        const pts=ring.map(p=>new THREE.Vector3(p.x,0.10,p.z)); pts.push(pts[0].clone());
+        const lmat=dashed?new THREE.LineDashedMaterial({color:bcol,dashSize:8,gapSize:5,depthWrite:false}):new THREE.LineBasicMaterial({color:bcol,depthWrite:false});
         const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),lmat); if(lmat.isLineDashedMaterial)line.computeLineDistances(); line.renderOrder=2; zoneGroup.add(line);
-        if(sel){ const pts2=ring.map(p=>new THREE.Vector3(p.x,0.15,p.z)); pts2.push(pts2[0]); zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2),new THREE.LineBasicMaterial({color:z.color}))); }
       });
     });
   });
