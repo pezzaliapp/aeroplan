@@ -226,11 +226,15 @@
             <button data-r="80000" style="flex:1">80 km</button>
           </div>
         </div>
-        <div style="display:flex;gap:12px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:8px">
-          <span><span style="color:var(--red)">●</span> Vietato</span>
-          <span><span style="color:var(--amber)">●</span> Autorizzazione</span>
-          <span><span style="color:var(--violet)">●</span> Condizionata</span>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:4px">
+          <span style="color:var(--faint)">QUOTA MAX AGL:</span>
+          <span><span style="color:#ff5a6a">●</span> 0</span>
+          <span><span style="color:#ff9d2e">●</span> 25</span>
+          <span><span style="color:#ffd23e">●</span> 45</span>
+          <span><span style="color:#39d6e0">●</span> 60</span>
+          <span><span style="color:#cdd9e5">●</span> 120 m</span>
         </div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--faint);margin-bottom:8px">Il colore = quota massima (come d-flight). Il <b style="color:var(--dim)">testo</b> = permesso (vietato / autorizzazione).</div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
           <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em"><input type="checkbox" id="zoneRemember" checked style="width:auto"> 💾 Ricorda offline</label>
           <button class="btn" id="zoneForget" style="padding:5px 9px;font-size:10px;margin-left:auto">🗑 Dimentica</button>
@@ -844,6 +848,14 @@ function restrColor(r){r=(r||'').toUpperCase();
   if(/CONDITION|RESTRICT|LIMIT/.test(r))return 0x9d8cff;
   return 0x39d6e0;
 }
+// colore per QUOTA MASSIMA AGL come la legenda ufficiale d-flight
+function altColor(u){ u=(u==null?120:u);
+  if(u<=0)return 0xff5a6a;      // 0 m
+  if(u<=25)return 0xff9d2e;     // 25 m
+  if(u<=45)return 0xffd23e;     // 45 m
+  if(u<=60)return 0x39d6e0;     // 60 m
+  return 0xcdd9e5;              // 120 m / standard
+}
 $('zoneOpenDflight').onclick=()=>window.open('https://www.d-flight.it/web-app/','_blank');
 $('zoneImportBtn').onclick=()=>$('zoneFile').click();
 $('zoneFile').addEventListener('change',e=>{const f=e.target.files[0];if(f)loadZoneFile(f);e.target.value='';});
@@ -949,7 +961,7 @@ function parseED269(data){
     // bounding box over all rings (for proximity test independent of Home)
     let minLon=Infinity,minLat=Infinity,maxLon=-Infinity,maxLat=-Infinity;
     polys.forEach(r=>r.forEach(p=>{if(p[0]<minLon)minLon=p[0];if(p[0]>maxLon)maxLon=p[0];if(p[1]<minLat)minLat=p[1];if(p[1]>maxLat)maxLat=p[1];}));
-    allZones.push({name,restriction,color:restrColor(restriction),lower,upper,uom,gpolys:polys,bbox:[minLon,minLat,maxLon,maxLat]});
+    allZones.push({name,restriction,color:altColor(upper),lower,upper,uom,gpolys:polys,bbox:[minLon,minLat,maxLon,maxLat]});
   }
 }
 function selectNearby(){
@@ -1014,10 +1026,10 @@ function renderZoneList(){
   if(!dfZones.length){L.innerHTML='<div class="empty">'+(allZones.length?('Nessuna zona entro '+(ZONE_MAXDIST/1000)+' km da questa Home. Aumenta il raggio o sposta la Home.'):'Carica il file ED-269 da D-Flight per vedere le zone.')+'</div>';return;}
   L.innerHTML='';
   dfZones.slice(0,150).forEach(z=>{
-    const ri=restrInfo(z.restriction), hex='#'+ri.color.toString(16).padStart(6,'0');
+    const ri=restrInfo(z.restriction), pcol='#'+ri.color.toString(16).padStart(6,'0'), acol='#'+(z.color>>>0).toString(16).padStart(6,'0');
     const el=document.createElement('div');el.className='wp';el.style.cursor='pointer';el.title='Mostra sulla mappa';
-    el.innerHTML=`<div class="h"><div class="idx"><span class="num" style="background:${hex};width:10px;height:10px"></span> ${z.name}</div><span style="color:var(--faint);font-size:11px">📍</span></div>
-      <div class="meta"><span style="color:${hex};font-weight:700">${ri.word}</span><span>quota ${z.lower||0}–${z.upper!=null?z.upper:'∞'} ${z.uom}</span></div>
+    el.innerHTML=`<div class="h"><div class="idx"><span class="num" style="background:${acol};width:10px;height:10px"></span> ${z.name}</div><span style="color:var(--faint);font-size:11px">📍</span></div>
+      <div class="meta"><span style="color:${pcol};font-weight:700">${ri.word}</span><span>max ${z.upper!=null?z.upper:120} ${z.uom} AGL</span></div>
       <div class="meta"><span style="color:var(--faint)">${ri.note}</span></div>`;
     el.onclick=()=>focusZone(z);
     L.appendChild(el);
