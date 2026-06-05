@@ -231,6 +231,11 @@
           <span><span style="color:var(--amber)">●</span> Autorizzazione</span>
           <span><span style="color:var(--violet)">●</span> Condizionata</span>
         </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em"><input type="checkbox" id="zoneRemember" checked style="width:auto"> 💾 Ricorda offline</label>
+          <button class="btn" id="zoneForget" style="padding:5px 9px;font-size:10px;margin-left:auto">🗑 Dimentica</button>
+        </div>
+        <p class="hint" id="zoneMeta"></p>
         <div class="wp-list" id="zoneList" style="max-height:180px"><div class="empty">Scarica da D-Flight (profilo → <b>Download UAS Geo Zone</b>) e carica qui il file: accetta direttamente il <b>.json.gz</b> (o il .json/.zip).<br>Le zone vicine alla Home verranno mostrate e i waypoint controllati.</div></div>
         <p class="hint" id="zoneConflict"></p>
         <p class="hint">Dati a solo scopo informativo. La fonte ufficiale resta <b>d-flight.it</b>: verifica sempre lì prima del volo.</p>
@@ -786,6 +791,7 @@ function markBaseLoading(kind){document.querySelectorAll('#baseSeg button').forE
 const zoneGroup=new THREE.Group(); scene.add(zoneGroup);
 let dfZones=[];                 // zones currently shown (near Home), projected to local
 let allZones=[];                // full parsed dataset (geo only), re-filtered when Home moves
+let zoneMeta={versionStr:null,versionDate:null,savedAt:null};
 let ZONE_MAXDIST=20000; const ZONE_CAP=800;
 function restrInfo(r){r=(r||'').toUpperCase();
   if(/PROHIB|NO_FLY|NOFLY|FORBID/.test(r))return{color:0xff5a6a,word:'VIETATO',note:'Volo non consentito'};
@@ -804,30 +810,61 @@ $('zoneOpenDflight').onclick=()=>window.open('https://www.d-flight.it/web-app/',
 $('zoneImportBtn').onclick=()=>$('zoneFile').click();
 $('zoneFile').addEventListener('change',e=>{const f=e.target.files[0];if(f)loadZoneFile(f);e.target.value='';});
 $('zoneToggle').addEventListener('change',e=>{zoneGroup.visible=e.target.checked;});
+$('zoneRemember').addEventListener('change',e=>{ if(!e.target.checked)idbDel('ed269').catch(()=>{}); });
+$('zoneForget').onclick=()=>{ idbDel('ed269').catch(()=>{}); allZones=[];dfZones=[];zoneMeta={versionStr:null,versionDate:null,savedAt:null}; buildZones();checkZones();renderWpList();updateZoneMetaUI(); toast('File zone dimenticato'); };
 document.querySelectorAll('#zoneRadSeg button').forEach(b=>b.onclick=()=>{
   ZONE_MAXDIST=+b.dataset.r;
   document.querySelectorAll('#zoneRadSeg button').forEach(x=>x.classList.toggle('active',x===b));
   $('zoneRadL').textContent=(ZONE_MAXDIST/1000)+' km';
   if(allZones.length){selectNearby();toast(dfZones.length+' zone entro '+(ZONE_MAXDIST/1000)+' km');}
 });
+async function bytesToText(buf,name){
+  const nm=name.toLowerCase();
+  if(nm.endsWith('.gz')){
+    if(typeof DecompressionStream==='undefined')throw new Error('browser senza supporto .gz: scompatta a mano in .json');
+    const stream=new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return await new Response(stream).text();
+  } else if(nm.endsWith('.zip')){
+    const zip=await JSZip.loadAsync(buf);let entry=null;
+    zip.forEach((p,o)=>{if(p.toLowerCase().endsWith('.json'))entry=o;});
+    if(!entry)throw new Error('nessun JSON nello zip');return await entry.async('string');
+  }
+  return new TextDecoder().decode(buf);
+}
+async function ingestZoneBytes(buf,name){
+  const text=await bytesToText(buf,name);
+  parseED269(JSON.parse(text));
+  selectNearby(); updateZoneMetaUI();
+}
 async function loadZoneFile(file){
   $('zoneImportBtn').textContent='⏳ …';$('zoneImportBtn').disabled=true;
   try{
-    let text; const nm=file.name.toLowerCase();
-    if(nm.endsWith('.gz')){
-      if(typeof DecompressionStream==='undefined')throw new Error('browser senza supporto .gz: scompatta a mano in .json');
-      const stream=file.stream().pipeThrough(new DecompressionStream('gzip'));
-      text=await new Response(stream).text();
-    } else if(nm.endsWith('.zip')){
-      const zip=await JSZip.loadAsync(await file.arrayBuffer());let entry=null;
-      zip.forEach((p,o)=>{if(p.toLowerCase().endsWith('.json'))entry=o;});
-      if(!entry)throw new Error('nessun JSON nello zip');text=await entry.async('string');
-    } else text=await file.text();
-    parseED269(JSON.parse(text));
-    selectNearby();
+    const buf=await file.arrayBuffer();
+    await ingestZoneBytes(buf,file.name);
     toast(dfZones.length+' zone vicine alla Home (su '+allZones.length+' totali)');
+    if($('zoneRemember').checked){ idbPut('ed269',{buf,name:file.name,savedAt:Date.now(),version:zoneMeta.versionStr}).catch(()=>{}); }
   }catch(err){toast('Zone: '+err.message);}
   $('zoneImportBtn').textContent='🛡 Carica ED-269';$('zoneImportBtn').disabled=false;
+}
+/* --- IndexedDB (large data, graceful if unavailable) --- */
+function idbDB(){return new Promise((res,rej)=>{try{const r=indexedDB.open('aeroplan',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('kv'))r.result.createObjectStore('kv');};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);}catch(e){rej(e);}});}
+async function idbPut(key,val){const db=await idbDB();return new Promise((res,rej)=>{const tx=db.transaction('kv','readwrite');tx.objectStore('kv').put(val,key);tx.oncomplete=()=>{db.close();res(true);};tx.onerror=()=>rej(tx.error);});}
+async function idbGet(key){const db=await idbDB();return new Promise((res,rej)=>{const tx=db.transaction('kv','readonly');const rq=tx.objectStore('kv').get(key);rq.onsuccess=()=>{db.close();res(rq.result);};rq.onerror=()=>rej(rq.error);});}
+async function idbDel(key){const db=await idbDB();return new Promise((res)=>{const tx=db.transaction('kv','readwrite');tx.objectStore('kv').delete(key);tx.oncomplete=()=>{db.close();res(true);};tx.onerror=()=>res(false);});}
+async function tryRestoreZones(){
+  try{ const rec=await idbGet('ed269'); if(rec&&rec.buf){ await ingestZoneBytes(rec.buf,rec.name||'ed269.json.gz'); zoneMeta.savedAt=rec.savedAt; updateZoneMetaUI(); } }catch(e){/* sandbox/no idb: ignore */}
+}
+function zoneAgeDays(){ if(!zoneMeta.versionDate)return null; return Math.floor((Date.now()-zoneMeta.versionDate.getTime())/86400000); }
+function updateZoneMetaUI(){
+  const el=$('zoneMeta'); if(!el)return;
+  if(!allZones.length){el.textContent='';return;}
+  const days=zoneAgeDays();
+  let s='Dati zone'+(zoneMeta.versionStr?(' del '+zoneMeta.versionStr):'' );
+  if(days!=null){
+    if(days>28) s='⚠ <b style="color:var(--amber)">Dati di '+days+' giorni fa</b> — possibile ciclo AIRAC scaduto: <b>riscarica da d-flight.it</b>.';
+    else s='✓ '+s+' ('+days+' gg fa).';
+  }
+  el.innerHTML=s;
 }
 function asPolys(geom){
   // returns array of polygons, each an array of [lon,lat]
@@ -846,6 +883,11 @@ function asPolys(geom){
   return out.filter(r=>r&&r.length>2);
 }
 function parseED269(data){
+  // capture version date from title e.g. "ITA ZoneVersion 05/06/2026 15:59:50"
+  zoneMeta={versionStr:null,versionDate:null,savedAt:zoneMeta.savedAt};
+  const t=(data&&(data.title||data.description))||'';
+  const m=t.match(/(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/);
+  if(m){zoneMeta.versionStr=m[0];zoneMeta.versionDate=new Date(+m[3],+m[2]-1,+m[1],+(m[4]||0),+(m[5]||0),+(m[6]||0));}
   let arr=Array.isArray(data)?data:(data.features||data.zones||data.UASZoneVersion||data.uasZoneVersion||[]);
   if(!Array.isArray(arr))arr=[];
   allZones=[];
@@ -1200,6 +1242,7 @@ ${waypoints.map(placemark).join('\n')}
 
 /* ===================== INIT ===================== */
 renderPresets();selPreset('custom');renderDjiModels();updateWpmlDesc();syncSliders();updateSurveyInfo();updateOrbStat();updateCorrStat();resize();resetTelem();renderWpList();
+tryRestoreZones();
 requestAnimationFrame(loop);
 
 /* ---- PWA service worker (auto-update) ---- */
