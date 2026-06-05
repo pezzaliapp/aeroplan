@@ -1100,16 +1100,22 @@ function parseED269(data){
 }
 function selectNearby(){
   const cosLat=Math.cos(home.lat*Math.PI/180);
-  dfZones=[];
+  // B13 — distanza Home→bbox per TUTTE le zone entro raggio, poi ordina e tronca al cap: tieni le più vicine
+  const cands=[];
   for(const z of allZones){
-    if(dfZones.length>=ZONE_CAP)break;
     // distance from Home to the zone bounding box (0 if Home inside)
     const cl=Math.max(z.bbox[0],Math.min(home.lon,z.bbox[2])), ca=Math.max(z.bbox[1],Math.min(home.lat,z.bbox[3]));
     const dE=(home.lon-cl)*111320*cosLat, dN=(home.lat-ca)*111320;
-    if(Math.hypot(dE,dN)>ZONE_MAXDIST)continue;
-    const local=z.gpolys.map(poly=>({outer:poly.outer.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}),holes:poly.holes.map(h=>h.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}))}));
-    dfZones.push(Object.assign({},z,{polys:local}));
+    const d=Math.hypot(dE,dN);
+    if(d>ZONE_MAXDIST)continue;
+    cands.push({z,d});
   }
+  cands.sort((a,b)=>a.d-b.d);
+  if(cands.length>ZONE_CAP)cands.length=ZONE_CAP;
+  dfZones=cands.map(({z})=>{
+    const local=z.gpolys.map(poly=>({outer:poly.outer.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}),holes:poly.holes.map(h=>h.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}))}));
+    return Object.assign({},z,{polys:local});
+  });
   buildZones(); checkZones(); renderWpList();
 }
 function buildZones(){
