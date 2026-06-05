@@ -538,7 +538,7 @@ function applyOrbit(){const x=orbit.tgt.x+orbit.dist*Math.sin(orbit.pol)*Math.co
 canvas.addEventListener('pointerdown',e=>{if(camMode==='orbit'){orbit.drag=true;orbit.px=e.clientX;orbit.py=e.clientY;}});
 addEventListener('pointerup',()=>orbit.drag=false);
 addEventListener('pointermove',e=>{if(!orbit.drag)return;orbit.az-=(e.clientX-orbit.px)*0.005;orbit.pol=clamp(orbit.pol-(e.clientY-orbit.py)*0.005,0.12,1.45);orbit.px=e.clientX;orbit.py=e.clientY;});
-canvas.addEventListener('wheel',e=>{if(camMode!=='orbit')return;e.preventDefault();orbit.dist=clamp(orbit.dist*(1+Math.sign(e.deltaY)*0.1),30,orbit.maxDist||2500);},{passive:false});
+canvas.addEventListener('wheel',e=>{if(camMode!=='orbit')return;e.preventDefault();orbit.dist=clamp(orbit.dist*(1+Math.sign(e.deltaY)*0.1),50,orbit.maxDist||2500);},{passive:false});
 
 /* raycast click */
 const ray=new THREE.Raycaster(),mouse=new THREE.Vector2();let downPos=null;
@@ -971,11 +971,13 @@ function buildZones(){
     const sel=(z.name===zoneSel);
     z.polys.forEach(ring=>{
       const shape=new THREE.Shape(ring.map(p=>new THREE.Vector2(p.x,-p.z)));
-      const fill=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:z.color,transparent:true,opacity:sel?0.34:0.16,side:THREE.DoubleSide,depthWrite:false}));
-      fill.rotation.x=-Math.PI/2; fill.position.y=sel?0.6:0.4; zoneGroup.add(fill);
-      const pts=ring.map(p=>new THREE.Vector3(p.x,sel?0.8:0.5,p.z)); pts.push(pts[0]);
+      // height band kept tight & low (0.28–0.5) so the overlay stays "glued" to the
+      // basemap plane (y=0.05) and doesn't visibly float/parallax at oblique zoom
+      const fill=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:z.color,transparent:true,opacity:sel?0.22:0.14,side:THREE.DoubleSide,depthWrite:false}));
+      fill.rotation.x=-Math.PI/2; fill.position.y=sel?0.32:0.28; fill.userData.isZoneFill=true; fill.renderOrder=1; zoneGroup.add(fill);
+      const pts=ring.map(p=>new THREE.Vector3(p.x,sel?0.46:0.34,p.z)); pts.push(pts[0]);
       zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:sel?0xffffff:z.color})));
-      if(sel){ const pts2=ring.map(p=>new THREE.Vector3(p.x,0.82,p.z)); pts2.push(pts2[0]); zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2),new THREE.LineBasicMaterial({color:z.color}))); }
+      if(sel){ const pts2=ring.map(p=>new THREE.Vector3(p.x,0.5,p.z)); pts2.push(pts2[0]); zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2),new THREE.LineBasicMaterial({color:z.color}))); }
     });
   });
   zoneGroup.visible=$('zoneToggle').checked;
@@ -1109,6 +1111,9 @@ function loop(now){
   }
   let activeCam=cam;
   if(camMode==='orbit')applyOrbit();
+  // when zoomed in close, drop the translucent zone fills (keep only the borders) so a
+  // selected zone doesn't flood the screen as a dark mass over the basemap/terrain
+  if(zoneGroup.visible){const zClose=(camMode==='orbit'&&orbit.dist<140);for(const ch of zoneGroup.children){if(ch.userData.isZoneFill)ch.visible=!zClose;}}
   else if(camMode==='chase'){const back=new THREE.Vector3(0,4,-16).applyQuaternion(drone.quaternion).add(drone.position);cam.position.lerp(back,0.12);cam.lookAt(drone.position.x,drone.position.y+2,drone.position.z);}
   else if(camMode==='fpv'){fpvCam.position.copy(drone.position);const look=new THREE.Vector3(0,0,10).applyQuaternion(drone.quaternion).add(drone.position);look.y-=Math.tan(drone.userData.gimbal.rotation.x)*10;fpvCam.up.set(0,1,0);fpvCam.lookAt(look);activeCam=fpvCam;}
   $('needle').style.transform=`translate(-50%,-100%) rotate(${-drone.rotation.y*180/Math.PI}deg)`;
