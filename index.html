@@ -593,10 +593,24 @@ function syncSliders(){
 });
 function renderDjiModels(){const s=$('djiModel');s.innerHTML='';DJI_MODELS.forEach(m=>{const o=document.createElement('option');o.value=m.id;o.textContent=m.nm;s.appendChild(o);});s.value=cfg.dji;s.onchange=e=>{cfg.dji=e.target.value;updateWpmlDesc();};}
 function updateWpmlDesc(){const m=DJI_MODELS.find(x=>x.id===cfg.dji);$('wpmlDesc').innerHTML=`<b>${m.nm}</b> · drone ${m.drone}/${m.sub} · payload ${m.payload} (${m.pname}). KMZ conforme per DJI Pilot 2.`;}
+// sorgente di verità unica per il cambio Home: aggiorna origine, ricarica base e ricentra camera
+function setHome(lat,lon,{reframe=true}={}){
+  if(!isFinite(lat)||!isFinite(lon))return;
+  home.lat=+(+lat).toFixed(6); home.lon=+(+lon).toFixed(6);
+  $('homeLat').value=home.lat; $('homeLon').value=home.lon;
+  drone.position.set(0,3,0); lastPos.set(0,3,0);            // drone = origine = Home
+  if(currentBase&&currentBase!=='proc'){ loadBasemap(currentBase); } // ricarica tile reali + riframe sulla nuova Home
+  else { relocalizeZones(); if(reframe)frameHome(WORLD.size); }       // su procedurale: rifiltra zone e ricentra
+}
+// input Lat/Lon: aggiorna live mentre si digita, riposiziona/ricentra al "change"
 ['homeLat','homeLon','homeAlt'].forEach(k=>{const key=k.replace('home','').toLowerCase();$(k).addEventListener('input',e=>home[key]=+e.target.value);});
-$('homeLat').addEventListener('change',relocalizeZones);$('homeLon').addEventListener('change',relocalizeZones);
+['homeLat','homeLon'].forEach(k=>$(k).addEventListener('change',()=>setHome(+$('homeLat').value,+$('homeLon').value)));
 const CITIES={'milano':[45.4642,9.1913],'roma':[41.9028,12.4964],'napoli':[40.8518,14.2681],'torino':[45.0703,7.6869],'firenze':[43.7696,11.2558],'venezia':[45.4408,12.3155],'bologna':[44.4949,11.3426],'palermo':[38.1157,13.3615],'bari':[41.1171,16.8719],'parigi':[48.8566,2.3522],'londra':[51.5074,-0.1278],'new york':[40.7128,-74.006],'tokyo':[35.6762,139.6503]};
-$('geoSearch').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const q=e.target.value.trim().toLowerCase();if(CITIES[q]){home.lat=CITIES[q][0];home.lon=CITIES[q][1];$('homeLat').value=home.lat;$('homeLon').value=home.lon;relocalizeZones();toast('Home → '+e.target.value);}else toast('Città non in elenco');});
+$('geoSearch').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const q=e.target.value.trim().toLowerCase();
+  // accetta coordinate "lat, lon" (o "lat lon") oltre alle città in elenco — nessun geocoding esterno
+  const m=q.match(/^(-?\d+(?:\.\d+)?)[ ,]+(-?\d+(?:\.\d+)?)$/);
+  if(m){const la=+m[1],lo=+m[2];if(Math.abs(la)<=90&&Math.abs(lo)<=180){setHome(la,lo);toast('Home → '+la.toFixed(5)+', '+lo.toFixed(5));}else toast('Coordinate fuori range');return;}
+  if(CITIES[q]){setHome(CITIES[q][0],CITIES[q][1]);toast('Home → '+e.target.value);}else toast('Città non in elenco — oppure digita "lat, lon"');});
 
 /* tool buttons */
 document.querySelectorAll('.toolbtn').forEach(b=>b.onclick=()=>{tool=b.dataset.tool;document.querySelectorAll('.toolbtn').forEach(x=>x.classList.toggle('sel',x===b));const tm=$('toolmode');if(tool==='poi'){tm.style.display='block';tm.textContent='🎯 Clicca per posizionare il POI';}else if(tool==='corridor'){tm.style.display='block';tm.textContent='🛣 Clicca per tracciare il percorso del corridoio';}else{tm.style.display='none';}});
@@ -751,12 +765,10 @@ $('geoBtn').onclick=async ()=>{
   b.textContent='📍 Localizzo…';b.disabled=true;
   // from here the browser shows its native prompt / "posizione disattivata nel sistema" bubble by itself
   navigator.geolocation.getCurrentPosition(pos=>{
-    home.lat=+pos.coords.latitude.toFixed(6);home.lon=+pos.coords.longitude.toFixed(6);
-    $('homeLat').value=home.lat;$('homeLon').value=home.lon;
     b.textContent='📍 Mia posizione';b.disabled=false;
     $('satHint').textContent='Posizione acquisita. Pianifica o carica il satellite.';
     toast('Posizione acquisita (±'+Math.round(pos.coords.accuracy)+'m)');
-    relocalizeZones(); if(currentBase!=='proc')loadBasemap(currentBase);
+    setHome(pos.coords.latitude,pos.coords.longitude);   // aggiorna Home, ricarica base e ricentra
   },err=>{
     b.textContent='📍 Mia posizione';b.disabled=false;
     $('satHint').innerHTML='Posizione non ottenuta. Se Chrome mostra il riquadro <b>"posizione disattivata nel sistema"</b>, usa lì il pulsante <b>Impostazioni di sistema</b>. In ogni caso puoi inserire <b>Lat/Lon</b> a mano o usare <b>Cerca città</b> — l\'app funziona al 100% senza GPS.';
