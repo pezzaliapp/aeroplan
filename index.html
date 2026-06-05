@@ -689,17 +689,24 @@ function updateMissionStats(){
 $('satBtn').onclick=()=>{ if(satPlane){removeSatellite();} else loadSatellite(); };
 $('geoBtn').onclick=()=>{
   if(!navigator.geolocation){toast('Geolocalizzazione non supportata');return;}
-  if(location.protocol!=='https:'&&location.hostname!=='localhost'){toast('La geolocalizzazione richiede HTTPS');}
+  if(location.protocol!=='https:'&&location.hostname!=='localhost'){toast('Serve HTTPS: apri il sito in https://');return;}
   const b=$('geoBtn');b.textContent='📍 Localizzo…';b.disabled=true;
   navigator.geolocation.getCurrentPosition(pos=>{
     home.lat=+pos.coords.latitude.toFixed(6);home.lon=+pos.coords.longitude.toFixed(6);
     $('homeLat').value=home.lat;$('homeLon').value=home.lon;
     b.textContent='📍 Mia posizione';b.disabled=false;
+    $('satHint').textContent='Posizione acquisita. Usa il satellite o pianifica i waypoint.';
     toast('Posizione acquisita (±'+Math.round(pos.coords.accuracy)+'m) — carico satellite');
-    relocalizeZones();
-    loadSatellite();
-  },err=>{ b.textContent='📍 Mia posizione';b.disabled=false; toast('Posizione non disponibile: '+err.message); },
-  {enableHighAccuracy:true,timeout:12000,maximumAge:60000});
+    relocalizeZones(); loadSatellite();
+  },err=>{
+    b.textContent='📍 Mia posizione';b.disabled=false;
+    if(err.code===1){
+      $('satHint').innerHTML='⚠ <b style="color:var(--amber)">Permesso posizione bloccato</b> per questo sito. Sblocca: tocca il <b>lucchetto</b> accanto all\'URL → <b>Posizione → Consenti</b>, poi ricarica. Su iPhone abilita anche <b>Impostazioni → Privacy → Localizzazione → Safari</b>. In alternativa scrivi a mano Latitudine/Longitudine qui sopra.';
+      toast('GPS: permesso bloccato — vedi istruzioni');
+    } else if(err.code===2){ $('satHint').textContent='GPS non disponibile (nessun segnale). Prova all\'aperto o inserisci le coordinate a mano.'; toast('GPS non disponibile'); }
+    else if(err.code===3){ $('satHint').textContent='Timeout GPS: riprova, meglio all\'aperto.'; toast('GPS: timeout'); }
+    else { toast('GPS: '+err.message); }
+  },{enableHighAccuracy:true,timeout:15000,maximumAge:60000});
 };
 function removeSatellite(){
   if(satPlane){scene.remove(satPlane);satPlane.geometry.dispose();satPlane.material.map?.dispose();satPlane.material.dispose();satPlane=null;}
