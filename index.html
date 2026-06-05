@@ -1114,15 +1114,15 @@ function buildZones(){
     const bcol=sel?0xffffff:(active?z.color:0x5a6678);     // zone non attive ora ⇒ grigie
     z.polys.forEach(ring=>{
       const shape=new THREE.Shape(ring.map(p=>new THREE.Vector2(p.x,-p.z)));
-      // height band kept tight & low (0.28–0.5) so the overlay stays "glued" to the
-      // basemap plane (y=0.05) and doesn't visibly float/parallax at oblique zoom
-      const fill=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:z.color,transparent:true,opacity:active?(sel?0.22:0.14):0.05,side:THREE.DoubleSide,depthWrite:false}));
-      fill.rotation.x=-Math.PI/2; fill.position.y=sel?0.32:0.28; fill.userData.isZoneFill=true; fill.renderOrder=1; zoneGroup.add(fill);
-      const pts=ring.map(p=>new THREE.Vector3(p.x,sel?0.46:0.34,p.z)); pts.push(pts[0]);
+      // B4 — overlay tenuto bassissimo (≈0.08) vicino al piano basemap (y=0.05); il polygonOffset
+      // evita lo z-fighting senza alzare fisicamente le zone, così restano "incollate" anche a 45°
+      const fill=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:z.color,transparent:true,opacity:active?(sel?0.22:0.14):0.05,side:THREE.DoubleSide,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
+      fill.rotation.x=-Math.PI/2; fill.position.y=sel?0.10:0.08; fill.userData.isZoneFill=true; fill.renderOrder=1; zoneGroup.add(fill);
+      const pts=ring.map(p=>new THREE.Vector3(p.x,sel?0.13:0.11,p.z)); pts.push(pts[0]);
       // bordo tratteggiato per zone dinamiche (NOTAM/NFZ) o non attive; pieno per le statiche
       const lmat=(z.dynamic||danger||!active)?new THREE.LineDashedMaterial({color:bcol,dashSize:8,gapSize:5}):new THREE.LineBasicMaterial({color:bcol});
-      const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),lmat); if(lmat.isLineDashedMaterial)line.computeLineDistances(); zoneGroup.add(line);
-      if(sel){ const pts2=ring.map(p=>new THREE.Vector3(p.x,0.5,p.z)); pts2.push(pts2[0]); zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2),new THREE.LineBasicMaterial({color:z.color}))); }
+      const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),lmat); if(lmat.isLineDashedMaterial)line.computeLineDistances(); line.renderOrder=2; zoneGroup.add(line);
+      if(sel){ const pts2=ring.map(p=>new THREE.Vector3(p.x,0.15,p.z)); pts2.push(pts2[0]); zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2),new THREE.LineBasicMaterial({color:z.color}))); }
     });
   });
   zoneGroup.visible=$('zoneToggle').checked;
