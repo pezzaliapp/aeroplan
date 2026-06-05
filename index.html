@@ -1036,8 +1036,15 @@ function updateZoneMetaUI(){
   }
   el.innerHTML=s;
 }
+// B12 — un poligono GeoJSON è [anelloEsterno, buco1, buco2, …]: conserva i buchi
+function pushPoly(out,rings){
+  if(!rings||!rings.length||!Array.isArray(rings[0]))return;
+  const outer=rings[0]; if(!outer||outer.length<=2)return;
+  const holes=[]; for(let i=1;i<rings.length;i++){ if(rings[i]&&rings[i].length>2)holes.push(rings[i]); }
+  out.push({outer,holes});
+}
 function asPolys(geom){
-  // returns array of polygons, each an array of [lon,lat]
+  // returns array of polygons: {outer:[[lon,lat]…], holes:[[[lon,lat]…],…]}
   const out=[];
   const hp=geom.horizontalProjection||geom.geometry||geom;
   const type=(hp.type||'').toLowerCase();
@@ -1046,11 +1053,11 @@ function asPolys(geom){
     const rad=+(hp.radius||hp.radiusM||0); const ring=[];
     const mLat=111320, mLon=111320*Math.cos(lat*Math.PI/180);
     for(let i=0;i<=32;i++){const a=i/32*2*Math.PI;ring.push([lon+(rad*Math.cos(a))/mLon,lat+(rad*Math.sin(a))/mLat]);}
-    out.push(ring);
-  } else if(type==='polygon'){ out.push(hp.coordinates[0]); }
-  else if(type==='multipolygon'){ hp.coordinates.forEach(p=>out.push(p[0])); }
-  else if(Array.isArray(hp.coordinates)&&Array.isArray(hp.coordinates[0])&&Array.isArray(hp.coordinates[0][0])){ out.push(hp.coordinates[0]); }
-  return out.filter(r=>r&&r.length>2);
+    out.push({outer:ring,holes:[]});
+  } else if(type==='polygon'){ pushPoly(out,hp.coordinates); }
+  else if(type==='multipolygon'){ hp.coordinates.forEach(p=>pushPoly(out,p)); }
+  else if(Array.isArray(hp.coordinates)&&Array.isArray(hp.coordinates[0])&&Array.isArray(hp.coordinates[0][0])){ pushPoly(out,hp.coordinates); }
+  return out.filter(p=>p.outer&&p.outer.length>2);
 }
 function parseED269(data){
   // capture version date from title e.g. "ITA ZoneVersion 05/06/2026 15:59:50"
@@ -1087,7 +1094,7 @@ function parseED269(data){
     const dynamic=apArr.some(a=>a&&(a.startDateTime||a.start||a.endDateTime||a.end||a.from||a.to));
     // bounding box over all rings (for proximity test independent of Home)
     let minLon=Infinity,minLat=Infinity,maxLon=-Infinity,maxLat=-Infinity;
-    polys.forEach(r=>r.forEach(p=>{if(p[0]<minLon)minLon=p[0];if(p[0]>maxLon)maxLon=p[0];if(p[1]<minLat)minLat=p[1];if(p[1]>maxLat)maxLat=p[1];}));
+    polys.forEach(P=>P.outer.forEach(p=>{if(p[0]<minLon)minLon=p[0];if(p[0]>maxLon)maxLon=p[0];if(p[1]<minLat)minLat=p[1];if(p[1]>maxLat)maxLat=p[1];}));
     allZones.push({name,restriction,color:zoneFillColor(restriction,upM),lower,upper,upperM:upM,uom,datum,applicability:apArr,dynamic,gpolys:polys,bbox:[minLon,minLat,maxLon,maxLat]});
   }
 }
@@ -1100,7 +1107,7 @@ function selectNearby(){
     const cl=Math.max(z.bbox[0],Math.min(home.lon,z.bbox[2])), ca=Math.max(z.bbox[1],Math.min(home.lat,z.bbox[3]));
     const dE=(home.lon-cl)*111320*cosLat, dN=(home.lat-ca)*111320;
     if(Math.hypot(dE,dN)>ZONE_MAXDIST)continue;
-    const local=z.gpolys.map(ring=>ring.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}));
+    const local=z.gpolys.map(poly=>({outer:poly.outer.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}),holes:poly.holes.map(h=>h.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}))}));
     dfZones.push(Object.assign({},z,{polys:local}));
   }
   buildZones(); checkZones(); renderWpList();
@@ -1112,17 +1119,21 @@ function buildZones(){
     const active=isZoneActiveNow(z);                       // B6
     const danger=!!restrInfo(z.restriction).danger;        // B5 — area pericolosa
     const bcol=sel?0xffffff:(active?z.color:0x5a6678);     // zone non attive ora ⇒ grigie
-    z.polys.forEach(ring=>{
-      const shape=new THREE.Shape(ring.map(p=>new THREE.Vector2(p.x,-p.z)));
+    z.polys.forEach(poly=>{
+      const shape=new THREE.Shape(poly.outer.map(p=>new THREE.Vector2(p.x,-p.z)));
+      poly.holes.forEach(h=>{ shape.holes.push(new THREE.Path(h.map(p=>new THREE.Vector2(p.x,-p.z)))); }); // B12 — sottrai i buchi dal fill
       // B4 — overlay tenuto bassissimo (≈0.08) vicino al piano basemap (y=0.05); il polygonOffset
       // evita lo z-fighting senza alzare fisicamente le zone, così restano "incollate" anche a 45°
       const fill=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:z.color,transparent:true,opacity:active?(sel?0.22:0.14):0.05,side:THREE.DoubleSide,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
       fill.rotation.x=-Math.PI/2; fill.position.y=sel?0.10:0.08; fill.userData.isZoneFill=true; fill.renderOrder=1; zoneGroup.add(fill);
-      const pts=ring.map(p=>new THREE.Vector3(p.x,sel?0.13:0.11,p.z)); pts.push(pts[0]);
-      // bordo tratteggiato per zone dinamiche (NOTAM/NFZ) o non attive; pieno per le statiche
-      const lmat=(z.dynamic||danger||!active)?new THREE.LineDashedMaterial({color:bcol,dashSize:8,gapSize:5}):new THREE.LineBasicMaterial({color:bcol});
-      const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),lmat); if(lmat.isLineDashedMaterial)line.computeLineDistances(); line.renderOrder=2; zoneGroup.add(line);
-      if(sel){ const pts2=ring.map(p=>new THREE.Vector3(p.x,0.15,p.z)); pts2.push(pts2[0]); zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2),new THREE.LineBasicMaterial({color:z.color}))); }
+      // bordi: anello esterno + eventuali buchi
+      [poly.outer,...poly.holes].forEach(ring=>{
+        const pts=ring.map(p=>new THREE.Vector3(p.x,sel?0.13:0.11,p.z)); pts.push(pts[0]);
+        // bordo tratteggiato per zone dinamiche (NOTAM/NFZ) o non attive; pieno per le statiche
+        const lmat=(z.dynamic||danger||!active)?new THREE.LineDashedMaterial({color:bcol,dashSize:8,gapSize:5}):new THREE.LineBasicMaterial({color:bcol});
+        const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),lmat); if(lmat.isLineDashedMaterial)line.computeLineDistances(); line.renderOrder=2; zoneGroup.add(line);
+        if(sel){ const pts2=ring.map(p=>new THREE.Vector3(p.x,0.15,p.z)); pts2.push(pts2[0]); zoneGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2),new THREE.LineBasicMaterial({color:z.color}))); }
+      });
     });
   });
   zoneGroup.visible=$('zoneToggle').checked;
@@ -1142,7 +1153,7 @@ function frameClose(){
 }
 function focusZone(z){
   let sx=0,sz=0,c=0,minx=1e9,minz=1e9,maxx=-1e9,maxz=-1e9;
-  z.polys.forEach(r=>r.forEach(p=>{sx+=p.x;sz+=p.z;c++;minx=Math.min(minx,p.x);maxx=Math.max(maxx,p.x);minz=Math.min(minz,p.z);maxz=Math.max(maxz,p.z);}));
+  z.polys.forEach(poly=>poly.outer.forEach(p=>{sx+=p.x;sz+=p.z;c++;minx=Math.min(minx,p.x);maxx=Math.max(maxx,p.x);minz=Math.min(minz,p.z);maxz=Math.max(maxz,p.z);}));
   if(!c)return;
   const cx=sx/c, cz=sz/c, rad=Math.max(Math.hypot(maxx-minx,maxz-minz)/2,120);
   camMode='orbit'; document.querySelectorAll('.vbadge button[data-cam]').forEach(x=>x.classList.toggle('active',x.dataset.cam==='orbit'));
@@ -1171,6 +1182,8 @@ function renderZoneList(){
   });
 }
 function pointInPoly(x,z,ring){let inside=false;for(let i=0,j=ring.length-1;i<ring.length;j=i++){const xi=ring[i].x,zi=ring[i].z,xj=ring[j].x,zj=ring[j].z;if(((zi>z)!=(zj>z))&&(x<(xj-xi)*(z-zi)/(zj-zi)+xi))inside=!inside;}return inside;}
+// B12 — punto dentro la zona = dentro un anello esterno e NON in un suo buco (donut)
+function zoneContains(z,px,pz){for(const poly of z.polys){if(pointInPoly(px,pz,poly.outer)){let inHole=false;for(const h of poly.holes){if(pointInPoly(px,pz,h)){inHole=true;break;}}if(!inHole)return true;}}return false;}
 function relocalizeZones(){if(!allZones.length)return;selectNearby();}
 function checkZones(){
   let nViet=0,nAuth=0,nOther=0,nAlt=0;
@@ -1179,8 +1192,7 @@ function checkZones(){
     let restrHit=null, minUpper=null, minUpperZone=null;
     for(const z of dfZones){
       if(!isZoneActiveNow(z))continue;   // B6 — ignora zone dinamiche non attive ora
-      let inside=false; for(const ring of z.polys){ if(pointInPoly(w.x,w.z,ring)){ inside=true; break; } }
-      if(!inside)continue;
+      if(!zoneContains(z,w.x,w.z))continue;   // B12 — rispetta i buchi (donut)
       // B8 — quota: tieni la zona con il limite verticale più basso tra quelle che contengono il waypoint
       const um=zoneUpperM(z); if(um!=null&&(minUpper==null||um<minUpper)){minUpper=um;minUpperZone=z;}
       // B10 — tra zone sovrapposte tieni la più restrittiva; a parità, quella con upper più basso
@@ -1195,15 +1207,14 @@ function checkZones(){
   // controllo del punto di DECOLLO (Home = origine locale 0,0)
   let homeZone=null;
   for(const z of dfZones){ if(!isZoneActiveNow(z))continue; if(/NO_RESTRICTION|^$/.test((z.restriction||'').toUpperCase()))continue;
-    let inside=false; for(const ring of z.polys){ if(pointInPoly(0,0,ring)){ inside=true; break; } }
-    if(!inside)continue;
+    if(!zoneContains(z,0,0))continue;
     // B10 — Home: scegli la zona più restrittiva, non la prima incontrata
     if(!homeZone) homeZone=z;
     else { const rk=restrRank(z.restriction)-restrRank(homeZone.restriction); if(rk>0||(rk===0&&(zoneUpperM(z)??1e9)<(zoneUpperM(homeZone)??1e9))) homeZone=z; }
   }
   // quota massima consentita al decollo = min upper tra TUTTE le zone attive che contengono la Home (anche senza restrizioni testuali)
   let homeUpper=null;
-  for(const z of dfZones){ if(!isZoneActiveNow(z))continue; for(const ring of z.polys){ if(pointInPoly(0,0,ring)){ const um=zoneUpperM(z); if(um!=null)homeUpper=(homeUpper==null?um:Math.min(homeUpper,um)); break; } } }
+  for(const z of dfZones){ if(!isZoneActiveNow(z))continue; if(zoneContains(z,0,0)){ const um=zoneUpperM(z); if(um!=null)homeUpper=(homeUpper==null?um:Math.min(homeUpper,um)); } }
   updateVerdict(homeZone,homeUpper,nViet,nAuth,nOther);
   const c=$('zoneConflict'), tot=nViet+nAuth+nOther;
   let html='';
