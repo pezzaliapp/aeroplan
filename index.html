@@ -978,6 +978,18 @@ function buildZones(){
   zoneGroup.visible=$('zoneToggle').checked;
   renderZoneList();
 }
+function focusZone(z){
+  let sx=0,sz=0,c=0,minx=1e9,minz=1e9,maxx=-1e9,maxz=-1e9;
+  z.polys.forEach(r=>r.forEach(p=>{sx+=p.x;sz+=p.z;c++;minx=Math.min(minx,p.x);maxx=Math.max(maxx,p.x);minz=Math.min(minz,p.z);maxz=Math.max(maxz,p.z);}));
+  if(!c)return;
+  const cx=sx/c, cz=sz/c, rad=Math.max(Math.hypot(maxx-minx,maxz-minz)/2,80);
+  // assicurati di essere in ORBIT
+  camMode='orbit'; document.querySelectorAll('.vbadge button').forEach(x=>x.classList.toggle('active',x.dataset.cam==='orbit'));
+  orbit.tgt.set(cx,0,cz);
+  orbit.dist=clamp(rad*2.6,120,orbit.maxDist||2500);
+  orbit.pol=0.85;
+  toast('Zona: '+z.name);
+}
 function renderZoneList(){
   $('zoneCount').textContent=dfZones.length;
   const L=$('zoneList');
@@ -985,10 +997,11 @@ function renderZoneList(){
   L.innerHTML='';
   dfZones.slice(0,150).forEach(z=>{
     const ri=restrInfo(z.restriction), hex='#'+ri.color.toString(16).padStart(6,'0');
-    const el=document.createElement('div');el.className='wp';el.style.cursor='default';
-    el.innerHTML=`<div class="h"><div class="idx"><span class="num" style="background:${hex};width:10px;height:10px"></span> ${z.name}</div></div>
+    const el=document.createElement('div');el.className='wp';el.style.cursor='pointer';el.title='Mostra sulla mappa';
+    el.innerHTML=`<div class="h"><div class="idx"><span class="num" style="background:${hex};width:10px;height:10px"></span> ${z.name}</div><span style="color:var(--faint);font-size:11px">📍</span></div>
       <div class="meta"><span style="color:${hex};font-weight:700">${ri.word}</span><span>quota ${z.lower||0}–${z.upper!=null?z.upper:'∞'} ${z.uom}</span></div>
       <div class="meta"><span style="color:var(--faint)">${ri.note}</span></div>`;
+    el.onclick=()=>focusZone(z);
     L.appendChild(el);
   });
 }
