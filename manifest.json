@@ -1,0 +1,15 @@
+{
+  "name": "AeroPlan — Drone Flight Planner & Simulator",
+  "short_name": "AeroPlan",
+  "description": "Simulatore 3D, configuratore e pianificatore di volo drone con export DJI WPML, Litchi, KML/GPX, POI/orbita, griglie fotogrammetriche e corridor mapping.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0e14",
+  "theme_color": "#ff9d2e",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
