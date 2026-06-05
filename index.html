@@ -599,8 +599,9 @@ function setHome(lat,lon,{reframe=true}={}){
   home.lat=+(+lat).toFixed(6); home.lon=+(+lon).toFixed(6);
   $('homeLat').value=home.lat; $('homeLon').value=home.lon;
   drone.position.set(0,3,0); lastPos.set(0,3,0);            // drone = origine = Home
-  if(currentBase&&currentBase!=='proc'){ loadBasemap(currentBase); } // ricarica tile reali + riframe sulla nuova Home
-  else { relocalizeZones(); if(reframe)frameHome(WORLD.size); }       // su procedurale: rifiltra zone e ricentra
+  // dopo ogni cambio Home la camera parte in PRIMO PIANO sul drone (B1+B3)
+  if(currentBase&&currentBase!=='proc'){ loadBasemap(currentBase,1200,true); } // tile reali ad alta risoluzione + vista ravvicinata sul drone
+  else { relocalizeZones(); if(reframe)frameClose(); }                          // su procedurale: rifiltra zone e primo piano sul drone
 }
 // input Lat/Lon: aggiorna live mentre si digita, riposiziona/ricentra al "change"
 ['homeLat','homeLon','homeAlt'].forEach(k=>{const key=k.replace('home','').toLowerCase();$(k).addEventListener('input',e=>home[key]=+e.target.value);});
@@ -1160,6 +1161,9 @@ function loop(now){
   const dt=Math.min(0.05,(now-lastFrame)/1000);lastFrame=now;
   drone.userData.rotors.forEach((r,i)=>r.rotation.y+=(i%2?1:-1)*(playing?1.2:0.35));
   poiGroup.children[0]&&(poiGroup.children[0].rotation.y+=0.02);
+  // B3 — drone + pad di lancio sempre leggibili: dimensione apparente ~costante in ORBIT (no scaling in chase/fpv, camera vicina)
+  if(camMode==='orbit'){const s=clamp(orbit.dist*0.022,1,80);drone.scale.setScalar(s);padRing.scale.setScalar(s);}
+  else {drone.scale.setScalar(1);padRing.scale.setScalar(1);}
   if(playing){
     simT+=dt*simSpeed; const st=simState(simT);
     if(st){
