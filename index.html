@@ -103,8 +103,15 @@
   .vbadge button{font-family:var(--mono);font-size:11px;background:rgba(8,12,20,.7);border:1px solid var(--line);color:var(--dim);padding:6px 11px;border-radius:7px;cursor:pointer;backdrop-filter:blur(4px)}
   .vbadge button.active{color:var(--amber);border-color:var(--amber)}
   .attrib{position:absolute;bottom:6px;right:8px;font-family:var(--mono);font-size:9px;color:rgba(230,237,246,.5);background:rgba(8,12,20,.6);padding:2px 7px;border-radius:5px;display:none}
-  .toolmode{position:absolute;top:14px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:11px;color:var(--amber);background:rgba(8,12,20,.75);border:1px solid var(--amber);padding:5px 12px;border-radius:7px;backdrop-filter:blur(4px);display:none;text-transform:uppercase;letter-spacing:.08em}
-  .toast{position:absolute;top:54px;left:50%;transform:translateX(-50%) translateY(-20px);background:rgba(8,12,20,.92);border:1px solid var(--amber);color:var(--amber);padding:9px 16px;border-radius:8px;font-size:12px;letter-spacing:.05em;opacity:0;transition:.3s;backdrop-filter:blur(6px);z-index:50;text-transform:uppercase}
+  .toolmode{position:absolute;top:64px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:11px;color:var(--amber);background:rgba(8,12,20,.75);border:1px solid var(--amber);padding:5px 12px;border-radius:7px;backdrop-filter:blur(4px);display:none;text-transform:uppercase;letter-spacing:.08em}
+  .toast{position:absolute;top:104px;left:50%;transform:translateX(-50%) translateY(-20px);background:rgba(8,12,20,.92);border:1px solid var(--amber);color:var(--amber);padding:9px 16px;border-radius:8px;font-size:12px;letter-spacing:.05em;opacity:0;transition:.3s;backdrop-filter:blur(6px);z-index:50;text-transform:uppercase}
+  /* B9 — verdetto "posso decollare?" sempre visibile in alto nel viewport 3D */
+  .verdict{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:45;font-family:var(--disp);text-align:center;padding:8px 18px;border-radius:10px;backdrop-filter:blur(6px);border:1px solid;display:none;max-width:min(94%,560px);box-shadow:0 8px 28px rgba(0,0,0,.55)}
+  .verdict .vmain{font-weight:700;letter-spacing:.05em;font-size:15px;line-height:1.2}
+  .verdict .vsub{font-family:var(--mono);font-size:11px;margin-top:4px;opacity:.95}
+  .verdict.green{background:rgba(8,32,18,.84);border-color:var(--green);color:var(--green)}
+  .verdict.amber{background:rgba(42,28,8,.84);border-color:var(--amber);color:var(--amber)}
+  .verdict.red{background:rgba(44,10,14,.88);border-color:var(--red);color:var(--red)}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   #telem{grid-column:1/3;background:linear-gradient(180deg,#0c111b,#10151f);border-top:1px solid var(--line);display:flex;align-items:center;padding:0 8px;gap:2px;overflow-x:auto}
   .gauge{flex:1;min-width:100px;padding:10px 14px;border-right:1px solid var(--line)}
@@ -315,6 +322,7 @@
 
   <div id="view">
     <canvas id="c"></canvas>
+    <div class="verdict" id="verdict"></div>
     <div class="hud hud-tl">
       <div><span class="k">MODE</span> <span id="hMode">PLANNING</span></div>
       <div><span class="k">ALT</span> <span id="hAlt">0.0</span> m</div>
@@ -898,6 +906,33 @@ function restrColor(r){r=(r||'').toUpperCase();
   if(/CONDITION|RESTRICT|LIMIT/.test(r))return 0x9d8cff;
   return 0x39d6e0;
 }
+// quota massima della zona convertita in METRI (gestisce uom 'ft'/'feet')
+function zoneUpperM(z){ if(z==null||z.upper==null)return null; const u=(z.uom||'m').toString().toLowerCase(); return (/ft|feet/.test(u))? z.upper*0.3048 : z.upper; }
+// B9 — banner verdetto "posso decollare?": riusa i conteggi già calcolati in checkZones
+function updateVerdict(homeZone,homeUpper,nViet,nAuth,nOther){
+  const el=$('verdict'); if(!el)return;
+  if(!dfZones.length){ el.style.display='none'; return; }
+  el.style.display='block';
+  const cap=Math.round(homeUpper!=null?Math.min(homeUpper,cfg.aMax):cfg.aMax);
+  let cls,txt;
+  if(homeZone){
+    const word=restrInfo(homeZone.restriction).word;
+    if(word==='VIETATO'||word==='PERICOLO'){cls='red';txt='⛔ DECOLLO VIETATO';}
+    else if(word==='AUTORIZZAZIONE'){cls='amber';txt='⚠ SERVE AUTORIZZAZIONE — max '+cap+' m AGL';}
+    else {cls='amber';txt='⚠ VOLO CONDIZIONATO — max '+cap+' m AGL';}
+  } else { cls='green'; txt='✓ DECOLLO LIBERO — max '+cap+' m AGL'; }
+  let sub='';
+  if(waypoints.length){
+    const nAlt=waypoints.filter(w=>w._altViol).length;
+    if(nViet||nAuth||nOther||nAlt){const p=[];
+      if(nViet)p.push(nViet+' in zona VIETATA'); if(nAuth)p.push(nAuth+' da autorizzare');
+      if(nOther)p.push(nOther+' condizionati'); if(nAlt)p.push(nAlt+' oltre quota');
+      sub='⚠ '+p.join(' · ');
+    } else sub='✓ tutti i waypoint in regola';
+  }
+  el.className='verdict '+cls;
+  el.innerHTML='<div class="vmain">'+txt+'</div>'+(sub?'<div class="vsub">'+sub+'</div>':'');
+}
 // colore per QUOTA MASSIMA AGL come la legenda ufficiale d-flight
 function altColor(u){ u=(u==null?120:u);
   if(u<=0)return 0xff5a6a;      // 0 m
@@ -1102,6 +1137,10 @@ function checkZones(){
   let homeZone=null;
   for(const z of dfZones){ if(/NO_RESTRICTION|^$/.test((z.restriction||'').toUpperCase()))continue;
     for(const ring of z.polys){ if(pointInPoly(0,0,ring)){ homeZone=z; break; } } if(homeZone)break; }
+  // quota massima consentita al decollo = min upper tra TUTTE le zone che contengono la Home (anche senza restrizioni testuali)
+  let homeUpper=null;
+  for(const z of dfZones){ for(const ring of z.polys){ if(pointInPoly(0,0,ring)){ const um=zoneUpperM(z); if(um!=null)homeUpper=(homeUpper==null?um:Math.min(homeUpper,um)); break; } } }
+  updateVerdict(homeZone,homeUpper,nViet,nAuth,nOther);
   const c=$('zoneConflict'), tot=nViet+nAuth+nOther;
   let html='';
   if(dfZones.length){
