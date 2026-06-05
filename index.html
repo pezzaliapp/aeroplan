@@ -1307,7 +1307,9 @@ function frameClose(){
   orbit.tgt.set(0,8,0); orbit.az=0.6; orbit.pol=0.62; orbit.dist=clamp(90,orbit.minDist||50,orbit.maxDist||2500);
   syncZoom(); scheduleZones();
 }
-function focusZone(z){
+// centra SOLO la camera (pan+zoom) sulla zona; nessun effetto su zoneSel/rendering
+function centerCameraOnZone(z){
+  if(!z||!z.polys)return;
   let sx=0,sz=0,c=0,minx=1e9,minz=1e9,maxx=-1e9,maxz=-1e9;
   z.polys.forEach(poly=>poly.outer.forEach(p=>{sx+=p.x;sz+=p.z;c++;minx=Math.min(minx,p.x);maxx=Math.max(maxx,p.x);minz=Math.min(minz,p.z);maxz=Math.max(maxz,p.z);}));
   if(!c)return;
@@ -1316,14 +1318,16 @@ function focusZone(z){
   // SOLO pan + zoom: mantieni l'orientamento attuale (niente vista storta)
   orbit.tgt.set(cx,0,cz);
   orbit.dist=clamp(rad*2.4,orbit.minDist||200,orbit.maxDist||2500);
-  zoneSel=z.name; buildZones();
   syncZoom(); scheduleLOD(); scheduleZones();   // ricarica i tile centrati sulla zona + rifiltra le zone inquadrate
-  toast('Zona: '+z.name);
 }
-// clic su una riga della lista: una sola zona "piena" per volta; ri-clic sulla stessa = deseleziona
+function focusZone(z){ zoneSel=z.name; buildZones(); centerCameraOnZone(z); toast('Zona: '+z.name); }
+// clic su una riga della lista: imposta zoneSel, RIDISEGNA il fill pieno e CENTRA la camera (effetti espliciti)
 function selectZoneFromList(z){
-  if(zoneSel===z.name){ zoneSel=null; buildZones(); toast('Zona deselezionata'); }
-  else focusZone(z);
+  if(zoneSel===z.name){ zoneSel=null; buildZones(); toast('Zona deselezionata'); return; }   // ri-clic = deseleziona
+  zoneSel=z.name;            // 1) selezione
+  buildZones();              // 2) re-render: fill pieno (0.66) sulla zona selezionata, le altre sfumate
+  centerCameraOnZone(z);     // 3) centra la camera sulla zona
+  toast('Zona: '+z.name);
 }
 function renderZoneList(){
   const drawnZones=dfZones.filter(z=>z._draw).sort((a,b)=>(a._dT||0)-(b._dT||0));   // zone inquadrate, più vicine prima
