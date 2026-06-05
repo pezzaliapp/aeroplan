@@ -1027,13 +1027,23 @@ function checkZones(){
       if(hit){ w._zone=z; const word=restrInfo(z.restriction).word; if(word==='VIETATO')nViet++; else if(word==='AUTORIZZAZIONE')nAuth++; else nOther++; break; }
     }
   });
+  // controllo del punto di DECOLLO (Home = origine locale 0,0)
+  let homeZone=null;
+  for(const z of dfZones){ if(/NO_RESTRICTION|^$/.test((z.restriction||'').toUpperCase()))continue;
+    for(const ring of z.polys){ if(pointInPoly(0,0,ring)){ homeZone=z; break; } } if(homeZone)break; }
   const c=$('zoneConflict'), tot=nViet+nAuth+nOther;
-  if(!dfZones.length)c.textContent='';
-  else if(tot){
-    const parts=[]; if(nViet)parts.push(`<b style="color:var(--red)">${nViet} in zona VIETATA</b>`); if(nAuth)parts.push(`<b style="color:var(--amber)">${nAuth} richiede autorizzazione</b>`); if(nOther)parts.push(`${nOther} con condizioni`);
-    c.innerHTML='⚠ '+parts.join(' · ')+' — verifica su d-flight.it.';
-  } else c.innerHTML=`✓ <b style="color:var(--green)">Nessun waypoint</b> nelle zone caricate.`;
-  return tot;
+  let html='';
+  if(dfZones.length){
+    if(homeZone){ const ri=restrInfo(homeZone.restriction), hx='#'+ri.color.toString(16).padStart(6,'0');
+      html+=`📍 <b style="color:${hx}">Decollo in zona ${ri.word}</b> — ${homeZone.name} (${ri.note}).<br>`;
+    } else html+=`📍 <b style="color:var(--green)">Decollo: nessuna zona con restrizioni</b> tra quelle caricate.<br>`;
+    if(tot){ const parts=[]; if(nViet)parts.push(`<b style="color:var(--red)">${nViet} in zona VIETATA</b>`); if(nAuth)parts.push(`<b style="color:var(--amber)">${nAuth} richiede autorizzazione</b>`); if(nOther)parts.push(`${nOther} con condizioni`);
+      html+='⚠ Waypoint: '+parts.join(' · ')+'.';
+    } else if(waypoints.length) html+=`✓ Waypoint: nessuno in zona.`;
+    html+=' <span style="color:var(--faint)">Verifica su d-flight.it.</span>';
+  }
+  c.innerHTML=html;
+  return tot+(homeZone?1:0);
 }
 
 /* ===================== SIMULATION ===================== */
