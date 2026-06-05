@@ -687,25 +687,28 @@ function updateMissionStats(){
 
 /* ===================== SATELLITE ===================== */
 $('satBtn').onclick=()=>{ if(satPlane){removeSatellite();} else loadSatellite(); };
-$('geoBtn').onclick=()=>{
+$('geoBtn').onclick=async ()=>{
   if(!navigator.geolocation){toast('Geolocalizzazione non supportata');return;}
   if(location.protocol!=='https:'&&location.hostname!=='localhost'){toast('Serve HTTPS: apri il sito in https://');return;}
-  const b=$('geoBtn');b.textContent='📍 Localizzo…';b.disabled=true;
+  const b=$('geoBtn');
+  // if the user previously blocked location for this site, the browser won't re-prompt — say so calmly
+  try{ if(navigator.permissions&&navigator.permissions.query){
+    const p=await navigator.permissions.query({name:'geolocation'});
+    if(p.state==='denied'){ $('satHint').innerHTML='Hai impostato la posizione su <b>Blocca</b> per questo sito. Riattivala dall\'icona a sinistra dell\'URL → Posizione, oppure inserisci <b>Lat/Lon</b> a mano qui sopra (l\'app funziona al 100% senza GPS).'; toast('Posizione bloccata per il sito'); return; }
+  }}catch(e){}
+  b.textContent='📍 Localizzo…';b.disabled=true;
+  // from here the browser shows its native prompt / "posizione disattivata nel sistema" bubble by itself
   navigator.geolocation.getCurrentPosition(pos=>{
     home.lat=+pos.coords.latitude.toFixed(6);home.lon=+pos.coords.longitude.toFixed(6);
     $('homeLat').value=home.lat;$('homeLon').value=home.lon;
     b.textContent='📍 Mia posizione';b.disabled=false;
-    $('satHint').textContent='Posizione acquisita. Usa il satellite o pianifica i waypoint.';
-    toast('Posizione acquisita (±'+Math.round(pos.coords.accuracy)+'m) — carico satellite');
+    $('satHint').textContent='Posizione acquisita. Pianifica o carica il satellite.';
+    toast('Posizione acquisita (±'+Math.round(pos.coords.accuracy)+'m)');
     relocalizeZones(); loadSatellite();
   },err=>{
     b.textContent='📍 Mia posizione';b.disabled=false;
-    if(err.code===1){
-      $('satHint').innerHTML='Nessun problema: puoi lasciare la <b>Localizzazione disattivata</b>. Inserisci <b>Latitudine/Longitudine</b> a mano o usa <b>Cerca città</b> qui sopra — l\'app funziona al 100% senza GPS. Solo se <i>vuoi</i> usare la posizione: su Mac serve accendere l\'interruttore generale "Localizzazione" (in alto) in Impostazioni di Sistema → Privacy e sicurezza; col master spento macOS non mostra il consenso e blocca tutte le app.';
-      toast('GPS: permesso bloccato — vedi istruzioni');
-    } else if(err.code===2){ $('satHint').innerHTML='GPS non disponibile. Su <b>Mac</b>: Impostazioni di Sistema → Privacy e sicurezza → <b>Localizzazione</b> → abilita <b>Google Chrome</b> (poi riavvia Chrome). Oppure inserisci le coordinate a mano.'; toast('GPS non disponibile'); }
-    else if(err.code===3){ $('satHint').textContent='Timeout GPS: riprova, meglio all\'aperto.'; toast('GPS: timeout'); }
-    else { toast('GPS: '+err.message); }
+    $('satHint').innerHTML='Posizione non ottenuta. Se Chrome mostra il riquadro <b>"posizione disattivata nel sistema"</b>, usa lì il pulsante <b>Impostazioni di sistema</b>. In ogni caso puoi inserire <b>Lat/Lon</b> a mano o usare <b>Cerca città</b> — l\'app funziona al 100% senza GPS.';
+    toast(err.code===3?'GPS: timeout':'Posizione non disponibile');
   },{enableHighAccuracy:true,timeout:15000,maximumAge:60000});
 };
 function removeSatellite(){
