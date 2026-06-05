@@ -218,6 +218,19 @@
         <label class="field" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px">
           <input type="checkbox" id="zoneToggle" checked style="width:auto"> <span style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">Mostra zone sulla mappa</span>
         </label>
+        <div class="field"><label>Raggio zone adiacenti <b id="zoneRadL">20 km</b></label>
+          <div class="seg" id="zoneRadSeg" style="width:100%">
+            <button data-r="10000" style="flex:1">10</button>
+            <button data-r="20000" class="active" style="flex:1">20</button>
+            <button data-r="40000" style="flex:1">40</button>
+            <button data-r="80000" style="flex:1">80 km</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:8px">
+          <span><span style="color:var(--red)">●</span> Vietato</span>
+          <span><span style="color:var(--amber)">●</span> Autorizzazione</span>
+          <span><span style="color:var(--violet)">●</span> Condizionata</span>
+        </div>
         <div class="wp-list" id="zoneList" style="max-height:180px"><div class="empty">Scarica da D-Flight (profilo → <b>Download UAS Geo Zone</b>) e carica qui il file: accetta direttamente il <b>.json.gz</b> (o il .json/.zip).<br>Le zone vicine alla Home verranno mostrate e i waypoint controllati.</div></div>
         <p class="hint" id="zoneConflict"></p>
         <p class="hint">Dati a solo scopo informativo. La fonte ufficiale resta <b>d-flight.it</b>: verifica sempre lì prima del volo.</p>
@@ -655,7 +668,7 @@ function renderWpList(){
     const el=document.createElement('div');el.className='wp'+(i===selected?' sel':'')+tagcls+(w._zone?' zoneconflict':'');
     el.innerHTML=`<div class="h"><div class="idx"><span class="num">${i+1}</span> ${kindlbl}</div><span class="x" data-del="${i}">✕</span></div>
       <div class="meta"><span>⛰ ${w.alt}m</span><span>➤ ${w.speed}m/s</span><span>↻ ${w.head}°</span><span>📷 ${w.gimbal}° ${w.action}</span></div>
-      <div class="meta"><span style="color:var(--faint)">${g.lat.toFixed(6)}, ${g.lon.toFixed(6)}${w.headingMode==='towardPOI'?' · POI-lock':''}</span>${w._zone?`<span style="color:var(--red)">⚠ ${w._zone.name}</span>`:''}</div>
+      <div class="meta"><span style="color:var(--faint)">${g.lat.toFixed(6)}, ${g.lon.toFixed(6)}${w.headingMode==='towardPOI'?' · POI-lock':''}</span>${w._zone?`<span style="color:#${restrInfo(w._zone.restriction).color.toString(16).padStart(6,'0')}">⚠ ${restrInfo(w._zone.restriction).word} · ${w._zone.name}</span>`:''}</div>
       <div class="wp-edit">
         <div class="row2"><div class="field"><label>Quota <b>${w.alt}m</b></label><input type="range" min="5" max="${cfg.aMax}" value="${w.alt}" data-f="alt" data-i="${i}"></div>
           <div class="field"><label>Velocità <b>${w.speed}</b></label><input type="range" min="1" max="${cfg.vMax}" value="${w.speed}" data-f="speed" data-i="${i}"></div></div>
@@ -773,7 +786,14 @@ function markBaseLoading(kind){document.querySelectorAll('#baseSeg button').forE
 const zoneGroup=new THREE.Group(); scene.add(zoneGroup);
 let dfZones=[];                 // zones currently shown (near Home), projected to local
 let allZones=[];                // full parsed dataset (geo only), re-filtered when Home moves
-const ZONE_MAXDIST=20000, ZONE_CAP=400;
+let ZONE_MAXDIST=20000; const ZONE_CAP=800;
+function restrInfo(r){r=(r||'').toUpperCase();
+  if(/PROHIB|NO_FLY|NOFLY|FORBID/.test(r))return{color:0xff5a6a,word:'VIETATO',note:'Volo non consentito'};
+  if(/AUTHOR|AUTORIZ|REQ/.test(r))return{color:0xff9d2e,word:'AUTORIZZAZIONE',note:'Serve permesso (D-Flight)'};
+  if(/CONDITION|RESTRICT|LIMIT/.test(r))return{color:0x9d8cff,word:'CONDIZIONATA',note:'Volo con condizioni'};
+  if(/NO_RESTRICTION/.test(r))return{color:0x46d97f,word:'LIBERA',note:'Senza restrizioni'};
+  return{color:0x39d6e0,word:(r||'ALTRO'),note:'Verifica su d-flight.it'};
+}
 function restrColor(r){r=(r||'').toUpperCase();
   if(/PROHIB|NO_FLY|NOFLY|FORBID/.test(r))return 0xff5a6a;
   if(/AUTHOR|AUTORIZ|REQ/.test(r))return 0xff9d2e;
@@ -784,6 +804,12 @@ $('zoneOpenDflight').onclick=()=>window.open('https://www.d-flight.it/web-app/',
 $('zoneImportBtn').onclick=()=>$('zoneFile').click();
 $('zoneFile').addEventListener('change',e=>{const f=e.target.files[0];if(f)loadZoneFile(f);e.target.value='';});
 $('zoneToggle').addEventListener('change',e=>{zoneGroup.visible=e.target.checked;});
+document.querySelectorAll('#zoneRadSeg button').forEach(b=>b.onclick=()=>{
+  ZONE_MAXDIST=+b.dataset.r;
+  document.querySelectorAll('#zoneRadSeg button').forEach(x=>x.classList.toggle('active',x===b));
+  $('zoneRadL').textContent=(ZONE_MAXDIST/1000)+' km';
+  if(allZones.length){selectNearby();toast(dfZones.length+' zone entro '+(ZONE_MAXDIST/1000)+' km');}
+});
 async function loadZoneFile(file){
   $('zoneImportBtn').textContent='⏳ …';$('zoneImportBtn').disabled=true;
   try{
@@ -876,33 +902,36 @@ function buildZones(){
 function renderZoneList(){
   $('zoneCount').textContent=dfZones.length;
   const L=$('zoneList');
-  if(!dfZones.length){L.innerHTML='<div class="empty">'+(allZones.length?'Nessuna zona entro 20 km da questa Home. Sposta la Home o cerca un\'altra città.':'Carica il file ED-269 da D-Flight per vedere le zone.')+'</div>';return;}
+  if(!dfZones.length){L.innerHTML='<div class="empty">'+(allZones.length?('Nessuna zona entro '+(ZONE_MAXDIST/1000)+' km da questa Home. Aumenta il raggio o sposta la Home.'):'Carica il file ED-269 da D-Flight per vedere le zone.')+'</div>';return;}
   L.innerHTML='';
-  dfZones.slice(0,120).forEach(z=>{
-    const hex='#'+z.color.toString(16).padStart(6,'0');
+  dfZones.slice(0,150).forEach(z=>{
+    const ri=restrInfo(z.restriction), hex='#'+ri.color.toString(16).padStart(6,'0');
     const el=document.createElement('div');el.className='wp';el.style.cursor='default';
     el.innerHTML=`<div class="h"><div class="idx"><span class="num" style="background:${hex};width:10px;height:10px"></span> ${z.name}</div></div>
-      <div class="meta"><span style="color:${hex}">${z.restriction||'—'}</span><span>${z.lower||0}–${z.upper!=null?z.upper:'∞'} ${z.uom} </span></div>`;
+      <div class="meta"><span style="color:${hex};font-weight:700">${ri.word}</span><span>quota ${z.lower||0}–${z.upper!=null?z.upper:'∞'} ${z.uom}</span></div>
+      <div class="meta"><span style="color:var(--faint)">${ri.note}</span></div>`;
     L.appendChild(el);
   });
 }
 function pointInPoly(x,z,ring){let inside=false;for(let i=0,j=ring.length-1;i<ring.length;j=i++){const xi=ring[i].x,zi=ring[i].z,xj=ring[j].x,zj=ring[j].z;if(((zi>z)!=(zj>z))&&(x<(xj-xi)*(z-zi)/(zj-zi)+xi))inside=!inside;}return inside;}
 function relocalizeZones(){if(!allZones.length)return;selectNearby();}
 function checkZones(){
-  let conflicts=0;
+  let nViet=0,nAuth=0,nOther=0;
   waypoints.forEach(w=>{ w._zone=null;
     if(!dfZones.length)return;
     for(const z of dfZones){
       if(/NO_RESTRICTION|^$/.test((z.restriction||'').toUpperCase()))continue;
-      for(const ring of z.polys){ if(pointInPoly(w.x,w.z,ring)){ w._zone=z; conflicts++; break; } }
-      if(w._zone)break;
+      let hit=false; for(const ring of z.polys){ if(pointInPoly(w.x,w.z,ring)){ hit=true; break; } }
+      if(hit){ w._zone=z; const word=restrInfo(z.restriction).word; if(word==='VIETATO')nViet++; else if(word==='AUTORIZZAZIONE')nAuth++; else nOther++; break; }
     }
   });
-  const c=$('zoneConflict');
+  const c=$('zoneConflict'), tot=nViet+nAuth+nOther;
   if(!dfZones.length)c.textContent='';
-  else if(conflicts)c.innerHTML=`⚠ <b style="color:var(--red)">${conflicts}</b> waypoint dentro zone con restrizioni — verifica su d-flight.it.`;
-  else c.innerHTML=`✓ <b style="color:var(--green)">Nessun waypoint</b> nelle zone caricate.`;
-  return conflicts;
+  else if(tot){
+    const parts=[]; if(nViet)parts.push(`<b style="color:var(--red)">${nViet} in zona VIETATA</b>`); if(nAuth)parts.push(`<b style="color:var(--amber)">${nAuth} richiede autorizzazione</b>`); if(nOther)parts.push(`${nOther} con condizioni`);
+    c.innerHTML='⚠ '+parts.join(' · ')+' — verifica su d-flight.it.';
+  } else c.innerHTML=`✓ <b style="color:var(--green)">Nessun waypoint</b> nelle zone caricate.`;
+  return tot;
 }
 
 /* ===================== SIMULATION ===================== */
