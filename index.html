@@ -103,6 +103,8 @@
   .vbadge button{font-family:var(--mono);font-size:11px;background:rgba(8,12,20,.7);border:1px solid var(--line);color:var(--dim);padding:6px 11px;border-radius:7px;cursor:pointer;backdrop-filter:blur(4px)}
   .vbadge button.active{color:var(--amber);border-color:var(--amber)}
   .attrib{position:absolute;bottom:6px;right:8px;font-family:var(--mono);font-size:9px;color:rgba(230,237,246,.5);background:rgba(8,12,20,.6);padding:2px 7px;border-radius:5px;display:none}
+  .ztip{position:absolute;pointer-events:none;z-index:60;background:rgba(8,12,20,.94);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-family:var(--mono);font-size:11px;line-height:1.55;display:none;max-width:250px;box-shadow:0 8px 24px rgba(0,0,0,.55);backdrop-filter:blur(4px)}
+  .ztip .zt-nm{font-weight:700;color:var(--ink);margin-bottom:2px}
   .toolmode{position:absolute;top:64px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:11px;color:var(--amber);background:rgba(8,12,20,.75);border:1px solid var(--amber);padding:5px 12px;border-radius:7px;backdrop-filter:blur(4px);display:none;text-transform:uppercase;letter-spacing:.08em}
   .toast{position:absolute;top:104px;left:50%;transform:translateX(-50%) translateY(-20px);background:rgba(8,12,20,.92);border:1px solid var(--amber);color:var(--amber);padding:9px 16px;border-radius:8px;font-size:12px;letter-spacing:.05em;opacity:0;transition:.3s;backdrop-filter:blur(6px);z-index:50;text-transform:uppercase}
   /* B9 — verdetto "posso decollare?" sempre visibile in alto nel viewport 3D */
@@ -341,6 +343,7 @@
       <button id="detailView" title="Vista ravvicinata e nitida sul drone">🔍 Dettaglio</button>
     </div>
     <div class="attrib" id="attrib">Imagery © Esri, Maxar, Earthstar Geographics</div>
+    <div class="ztip" id="ztip"></div>
     <div class="toast" id="toast"></div>
   </div>
 
@@ -564,6 +567,7 @@ canvas.addEventListener('pointerup',e=>{
   ray.setFromCamera(mouse,cam);
   const hit=ray.intersectObject(groundMesh,true);
   if(!hit.length)return; const p=hit[0].point;
+  showZoneTipAt(e.clientX,e.clientY,p.x,p.z,true);   // Fix 3 — su tap (mobile e desktop) mostra info zona al punto toccato
   if(tool==='poi'){ poi={x:+p.x.toFixed(1),z:+p.z.toFixed(1),alt:0}; rebuildPOI(); updateOrbStat(); toast('POI posizionato'); return; }
   if(tool==='corridor'){ corridorPath.push({x:+p.x.toFixed(1),z:+p.z.toFixed(1)}); rebuildCorridor(); updateCorrStat(); toast('Punto percorso '+corridorPath.length); return; }
   waypoints.push({x:+p.x.toFixed(1),z:+p.z.toFixed(1),alt:clamp(40,5,cfg.aMax),speed:Math.min(8,cfg.vMax),head:0,hover:0,gimbal:-30,action:'photo',headingMode:'smooth',kind:'wp'});
@@ -614,7 +618,23 @@ function setHome(lat,lon,{reframe=true}={}){
 // input Lat/Lon: aggiorna live mentre si digita, riposiziona/ricentra al "change"
 ['homeLat','homeLon','homeAlt'].forEach(k=>{const key=k.replace('home','').toLowerCase();$(k).addEventListener('input',e=>home[key]=+e.target.value);});
 ['homeLat','homeLon'].forEach(k=>$(k).addEventListener('change',()=>setHome(+$('homeLat').value,+$('homeLon').value)));
-const CITIES={'milano':[45.4642,9.1913],'roma':[41.9028,12.4964],'napoli':[40.8518,14.2681],'torino':[45.0703,7.6869],'firenze':[43.7696,11.2558],'venezia':[45.4408,12.3155],'bologna':[44.4949,11.3426],'palermo':[38.1157,13.3615],'bari':[41.1171,16.8719],'parigi':[48.8566,2.3522],'londra':[51.5074,-0.1278],'new york':[40.7128,-74.006],'tokyo':[35.6762,139.6503]};
+const CITIES={
+  // capoluoghi di provincia / città metropolitane italiane (centro città, WGS84)
+  'agrigento':[37.3110,13.5765],'alessandria':[44.9133,8.6149],'ancona':[43.6158,13.5189],'aosta':[45.7372,7.3206],'arezzo':[43.4633,11.8796],'ascoli piceno':[42.8537,13.5749],'asti':[44.9009,8.2065],'avellino':[40.9146,14.7929],
+  'bari':[41.1171,16.8719],'barletta':[41.3194,16.2840],'belluno':[46.1391,12.2160],'benevento':[41.1297,14.7826],'bergamo':[45.6983,9.6773],'biella':[45.5663,8.0537],'bologna':[44.4949,11.3426],'bolzano':[46.4983,11.3548],'brescia':[45.5416,10.2118],'brindisi':[40.6327,17.9418],
+  'cagliari':[39.2238,9.1217],'caltanissetta':[37.4901,14.0628],'campobasso':[41.5630,14.6627],'carrara':[44.0793,10.0977],'caserta':[41.0723,14.3329],'catania':[37.5079,15.0830],'catanzaro':[38.9098,16.5877],'cesena':[44.1391,12.2431],'chieti':[42.3512,14.1680],'como':[45.8081,9.0852],'cosenza':[39.2983,16.2536],'cremona':[45.1332,10.0227],'crotone':[39.0808,17.1270],'cuneo':[44.3841,7.5426],
+  'enna':[37.5670,14.2795],'fermo':[43.1607,13.7180],'ferrara':[44.8378,11.6196],'firenze':[43.7696,11.2558],'foggia':[41.4622,15.5446],'forli':[44.2227,12.0407],'forlì':[44.2227,12.0407],'frosinone':[41.6396,13.3517],
+  'genova':[44.4056,8.9463],'gorizia':[45.9410,13.6228],'grosseto':[42.7603,11.1136],'imperia':[43.8893,8.0391],'isernia':[41.5961,14.2310],
+  "l'aquila":[42.3498,13.3995],'laquila':[42.3498,13.3995],'la spezia':[44.1025,9.8241],'latina':[41.4677,12.9036],'lecce':[40.3515,18.1750],'lecco':[45.8566,9.3977],'livorno':[43.5485,10.3106],'lodi':[45.3142,9.5034],'lucca':[43.8430,10.5077],
+  'macerata':[43.3007,13.4530],'mantova':[45.1564,10.7914],'massa':[44.0367,10.1413],'matera':[40.6664,16.6043],'messina':[38.1938,15.5540],'milano':[45.4642,9.1900],'modena':[44.6471,10.9252],'monza':[45.5845,9.2744],
+  'napoli':[40.8518,14.2681],'novara':[45.4469,8.6222],'nuoro':[40.3210,9.3290],'olbia':[40.9236,9.4980],'oristano':[39.9036,8.5915],
+  'padova':[45.4064,11.8768],'palermo':[38.1157,13.3615],'parma':[44.8015,10.3279],'pavia':[45.1847,9.1582],'perugia':[43.1107,12.3908],'pesaro':[43.9102,12.9132],'pescara':[42.4643,14.2142],'piacenza':[45.0526,9.6929],'pisa':[43.7160,10.3966],'pistoia':[43.9333,10.9170],'pordenone':[45.9626,12.6603],'potenza':[40.6395,15.8056],'prato':[43.8777,11.1021],
+  'ragusa':[36.9269,14.7255],'ravenna':[44.4184,12.2035],'reggio calabria':[38.1105,15.6613],'reggio emilia':[44.6983,10.6312],'rieti':[42.4048,12.8567],'rimini':[44.0678,12.5695],'roma':[41.9028,12.4964],'rovigo':[45.0703,11.7905],
+  'salerno':[40.6824,14.7681],'sassari':[40.7259,8.5557],'savona':[44.3091,8.4772],'siena':[43.3188,11.3308],'siracusa':[37.0755,15.2866],'sondrio':[46.1700,9.8700],
+  'taranto':[40.4644,17.2470],'teramo':[42.6589,13.7045],'terni':[42.5636,12.6427],'torino':[45.0703,7.6869],'trani':[41.2768,16.4178],'trapani':[38.0176,12.5365],'trento':[46.0700,11.1190],'treviso':[45.6669,12.2433],'trieste':[45.6495,13.7768],
+  'udine':[46.0711,13.2346],'urbino':[43.7262,12.6365],'varese':[45.8206,8.8251],'venezia':[45.4408,12.3155],'verbania':[45.9213,8.5519],'vercelli':[45.3201,8.4185],'verona':[45.4384,10.9916],'vibo valentia':[38.6759,16.1003],'vicenza':[45.5455,11.5354],'viterbo':[42.4175,12.1057],
+  // alcune città estere di riferimento
+  'parigi':[48.8566,2.3522],'londra':[51.5074,-0.1278],'new york':[40.7128,-74.006],'tokyo':[35.6762,139.6503]};
 $('geoSearch').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const q=e.target.value.trim().toLowerCase();
   // accetta coordinate "lat, lon" (o "lat lon") oltre alle città in elenco — nessun geocoding esterno
   const m=q.match(/^(-?\d+(?:\.\d+)?)[ ,]+(-?\d+(?:\.\d+)?)$/);
@@ -786,6 +806,7 @@ $('geoBtn').onclick=async ()=>{
 };
 function removeSatellite(){
   if(satPlane){scene.remove(satPlane);satPlane.geometry.dispose();satPlane.material.map?.dispose();satPlane.material.dispose();satPlane=null;}
+  if(satUnderlay)satUnderlay.visible=false;
   terrain.visible=true;grid.visible=true;proceduralGroup.visible=true;groundMesh=terrain;WORLD.size=2400;
   // ripristina la scena locale
   cam.far=8000;fpvCam.far=8000;cam.updateProjectionMatrix();fpvCam.updateProjectionMatrix();
@@ -801,7 +822,18 @@ const BASEMAPS={
 };
 /* ===== LOD dinamico: ricarico i tile reali a una risoluzione adatta alla distanza camera ===== */
 let lodTimer=null, lastLoadedZ=null, loadedCenter={x:0,z:0}, loadedWorld=2400;
+let satUnderlay=null;
 const SPAN_TILES=5;   // mosaico 5×5 (k=2)
+// Fix 2 — piano scuro neutro molto ampio sotto il mosaico: riempie il viewport oltre il bordo dei tile (niente vuoto nero / bordo netto)
+function ensureUnderlay(worldSize){
+  const size=Math.max(worldSize*8,400000);
+  if(!satUnderlay){
+    const g=new THREE.PlaneGeometry(1,1); g.rotateX(-Math.PI/2);
+    satUnderlay=new THREE.Mesh(g,new THREE.MeshBasicMaterial({color:0x0b1018}));
+    satUnderlay.renderOrder=-1; scene.add(satUnderlay);
+  }
+  satUnderlay.scale.set(size,1,size); satUnderlay.position.set(0,0.02,0); satUnderlay.visible=true;
+}
 function desiredTileZ(extent){
   const latRad=home.lat*Math.PI/180;
   let z=Math.round(Math.log2(SPAN_TILES*256*156543.03392*Math.cos(latRad)/clamp(extent,900,180000)));
@@ -855,11 +887,14 @@ async function loadBasemap(kind,extentOverride,frameCloseOn,keepView,centerLocal
     // posiziona il piano così che il punto geografico centrale cada esattamente sulle sue coord locali
     const cl=fromGPS(cgeo.lat,cgeo.lon);
     const cpx=(fx-(xc-k))*256, cpy=(fy-(yc-k))*256;
-    if(satPlane){scene.remove(satPlane);satPlane.material.map?.dispose();}
+    // Fix 4 — niente flash sfocato: costruisci e aggiungi il NUOVO piano prima di rimuovere il vecchio
     const geo=new THREE.PlaneGeometry(worldSize,worldSize);geo.rotateX(-Math.PI/2);
     const mat = kind==='map' ? new THREE.MeshBasicMaterial({map:tex}) : new THREE.MeshStandardMaterial({map:tex,roughness:1});
-    satPlane=new THREE.Mesh(geo,mat);
-    satPlane.position.set(cl.x-(cpx-total/2)*res,0.05,cl.z-(cpy-total/2)*res); satPlane.receiveShadow=(kind!=='map'); scene.add(satPlane);
+    const newPlane=new THREE.Mesh(geo,mat);
+    newPlane.position.set(cl.x-(cpx-total/2)*res,0.05,cl.z-(cpy-total/2)*res); newPlane.receiveShadow=(kind!=='map'); scene.add(newPlane);
+    const oldPlane=satPlane; satPlane=newPlane;
+    if(oldPlane){scene.remove(oldPlane);oldPlane.material.map?.dispose();oldPlane.geometry.dispose();oldPlane.material.dispose();}
+    ensureUnderlay(worldSize);   // Fix 2 — sfondo neutro sempre presente sotto/oltre il mosaico
     terrain.visible=false;grid.visible=false;proceduralGroup.visible=false;groundMesh=satPlane;
     lastLoadedZ=z; loadedCenter={x:ctr.x,z:ctr.z}; loadedWorld=worldSize;
     if(!keepView){
@@ -1190,6 +1225,51 @@ function renderZoneList(){
 function pointInPoly(x,z,ring){let inside=false;for(let i=0,j=ring.length-1;i<ring.length;j=i++){const xi=ring[i].x,zi=ring[i].z,xj=ring[j].x,zj=ring[j].z;if(((zi>z)!=(zj>z))&&(x<(xj-xi)*(z-zi)/(zj-zi)+xi))inside=!inside;}return inside;}
 // B12 — punto dentro la zona = dentro un anello esterno e NON in un suo buco (donut)
 function zoneContains(z,px,pz){for(const poly of z.polys){if(pointInPoly(px,pz,poly.outer)){let inHole=false;for(const h of poly.holes){if(pointInPoly(px,pz,h)){inHole=true;break;}}if(!inHole)return true;}}return false;}
+/* ===== Fix 3 — tooltip zona (hover desktop / tap mobile) ===== */
+function zoneAtPoint(px,pz){
+  let best=null;
+  for(const z of dfZones){ if(!zoneContains(z,px,pz))continue;
+    if(!best) best=z; else { const rk=restrRank(z.restriction)-restrRank(best.restriction); if(rk>0||(rk===0&&(zoneUpperM(z)??1e9)<(zoneUpperM(best)??1e9))) best=z; }
+  }
+  return best;
+}
+function zoneTipHTML(z){
+  const ri=restrInfo(z.restriction), pcol='#'+ri.color.toString(16).padStart(6,'0'), acol='#'+(z.color>>>0).toString(16).padStart(6,'0');
+  const lo=(z.lower!=null?z.lower:0), up=(z.upper!=null?z.upper:'?'), dat=z.upper!=null?(z.datum||'AGL'):'';
+  const act=isZoneActiveNow(z);
+  return `<div class="zt-nm">${z.name}</div>`+
+    `<div style="color:${pcol};font-weight:700">${ri.word}</div>`+
+    `<div><span style="color:${acol}">●</span> quota ${lo}–${up} ${z.uom||'m'} ${dat}</div>`+
+    (z.dynamic?`<div style="color:${act?'var(--cyan)':'var(--faint)'}">🕒 ${act?'attiva ora':'NON attiva ora'}</div>`:'');
+}
+let zTipTimer=null, tipMouse=null, tipNeedsUpdate=false;
+function hideZoneTip(){const el=$('ztip');if(el)el.style.display='none';clearTimeout(zTipTimer);zTipTimer=null;}
+function showZoneTipAt(clientX,clientY,px,pz,autohide){
+  const el=$('ztip'); if(!el)return;
+  if(!zoneGroup.visible||!dfZones.length){el.style.display='none';return;}
+  const z=zoneAtPoint(px,pz);
+  if(!z){el.style.display='none';return;}
+  el.innerHTML=zoneTipHTML(z);
+  const r=$('view').getBoundingClientRect();
+  el.style.display='block';
+  let x=clientX-r.left+14, y=clientY-r.top+14;
+  const ew=el.offsetWidth, eh=el.offsetHeight;
+  if(x+ew>r.width)x=clientX-r.left-ew-14; if(y+eh>r.height)y=clientY-r.top-eh-14;
+  el.style.left=Math.max(4,x)+'px'; el.style.top=Math.max(4,y)+'px';
+  clearTimeout(zTipTimer); zTipTimer=null; if(autohide)zTipTimer=setTimeout(()=>{el.style.display='none';zTipTimer=null;},2800);
+}
+function updateHoverTip(cx,cy){
+  if(playing||!zoneGroup.visible||!dfZones.length){hideZoneTip();return;}
+  const r=canvas.getBoundingClientRect();
+  mouse.x=((cx-r.left)/r.width)*2-1; mouse.y=-((cy-r.top)/r.height)*2+1;
+  ray.setFromCamera(mouse,camMode==='fpv'?fpvCam:cam);
+  const hit=ray.intersectObject(groundMesh,true);
+  if(!hit.length){hideZoneTip();return;}
+  showZoneTipAt(cx,cy,hit[0].point.x,hit[0].point.z,false);
+}
+// hover col mouse (no touch: su mobile si usa il tap, gestito nel click handler)
+canvas.addEventListener('pointermove',e=>{ if(e.pointerType==='touch')return; if(orbit.drag){hideZoneTip();return;} tipMouse={x:e.clientX,y:e.clientY}; tipNeedsUpdate=true; });
+canvas.addEventListener('pointerleave',()=>{tipMouse=null;hideZoneTip();});
 function relocalizeZones(){if(!allZones.length)return;selectNearby();}
 function checkZones(){
   let nViet=0,nAuth=0,nOther=0,nAlt=0;
@@ -1281,8 +1361,9 @@ function loop(now){
   const dt=Math.min(0.05,(now-lastFrame)/1000);lastFrame=now;
   drone.userData.rotors.forEach((r,i)=>r.rotation.y+=(i%2?1:-1)*(playing?1.2:0.35));
   poiGroup.children[0]&&(poiGroup.children[0].rotation.y+=0.02);
+  if(tipNeedsUpdate&&tipMouse){tipNeedsUpdate=false;updateHoverTip(tipMouse.x,tipMouse.y);}   // Fix 3 — hover tooltip zona, throttle a 1/frame
   // B3 — drone + pad di lancio sempre leggibili: dimensione apparente ~costante in ORBIT (no scaling in chase/fpv, camera vicina)
-  if(camMode==='orbit'){const s=clamp(orbit.dist*0.022,1,80);drone.scale.setScalar(s);padRing.scale.setScalar(s);}
+  if(camMode==='orbit'){const s=clamp(orbit.dist*0.008,1,28);drone.scale.setScalar(s);padRing.scale.setScalar(s);}
   else {drone.scale.setScalar(1);padRing.scale.setScalar(1);}
   if(playing){
     simT+=dt*simSpeed; const st=simState(simT);
