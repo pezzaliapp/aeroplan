@@ -543,7 +543,7 @@ function applyOrbit(){const x=orbit.tgt.x+orbit.dist*Math.sin(orbit.pol)*Math.co
 canvas.addEventListener('pointerdown',e=>{if(camMode==='orbit'){orbit.drag=true;orbit.px=e.clientX;orbit.py=e.clientY;}});
 addEventListener('pointerup',()=>orbit.drag=false);
 addEventListener('pointermove',e=>{if(!orbit.drag)return;orbit.az-=(e.clientX-orbit.px)*0.005;orbit.pol=clamp(orbit.pol-(e.clientY-orbit.py)*0.005,0.12,1.45);orbit.px=e.clientX;orbit.py=e.clientY;});
-canvas.addEventListener('wheel',e=>{if(camMode!=='orbit')return;e.preventDefault();orbit.dist=clamp(orbit.dist*(1+Math.sign(e.deltaY)*0.1),50,orbit.maxDist||2500);},{passive:false});
+canvas.addEventListener('wheel',e=>{if(camMode!=='orbit')return;e.preventDefault();orbit.dist=clamp(orbit.dist*(1+Math.sign(e.deltaY)*0.1),50,orbit.maxDist||2500);scheduleLOD();},{passive:false});
 
 /* raycast click */
 const ray=new THREE.Raycaster(),mouse=new THREE.Vector2();let downPos=null;
@@ -782,6 +782,7 @@ function removeSatellite(){
   cam.far=8000;fpvCam.far=8000;cam.updateProjectionMatrix();fpvCam.updateProjectionMatrix();
   scene.fog=new THREE.FogExp2(0x0a1018,0.0014);
   orbit.maxDist=2500; orbit.dist=Math.min(orbit.dist,2500);
+  lastLoadedZ=null;   // reset LOD: la prossima base satellite ricalcola lo zoom
   $('attrib').style.display='none';
   relocalizeZones();
 }
@@ -789,16 +790,42 @@ const BASEMAPS={
   sat:{url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,attr:'Imagery © Esri, Maxar, Earthstar Geographics',rough:1,emissive:0x000000},
   map:{url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${z}/${y}/${x}`,attr:'Map © Esri, HERE, Garmin, OpenStreetMap contributors',rough:1,emissive:0x222222}
 };
-async function loadBasemap(kind,extentOverride,frameCloseOn){
+/* ===== LOD dinamico: ricarico i tile reali a una risoluzione adatta alla distanza camera ===== */
+let lodTimer=null, lastLoadedZ=null, loadedCenter={x:0,z:0}, loadedWorld=2400;
+const SPAN_TILES=5;   // mosaico 5×5 (k=2)
+function desiredTileZ(extent){
+  const latRad=home.lat*Math.PI/180;
+  let z=Math.round(Math.log2(SPAN_TILES*256*156543.03392*Math.cos(latRad)/clamp(extent,900,180000)));
+  return clamp(z,9,20);
+}
+// chiamata su zoom/spostamento: se serve più dettaglio (o ci si è spostati), ricarica i tile mantenendo la vista
+function scheduleLOD(){
+  if(currentBase==='proc'||!satPlane)return;
+  clearTimeout(lodTimer);
+  lodTimer=setTimeout(()=>{
+    if(currentBase==='proc'||!satPlane||camMode!=='orbit')return;
+    const extent=orbit.dist*2.0;
+    const z=desiredTileZ(extent);
+    const moved=Math.hypot(orbit.tgt.x-loadedCenter.x,orbit.tgt.z-loadedCenter.z);
+    if(z!==lastLoadedZ || moved>loadedWorld*0.3){
+      loadBasemap(currentBase,extent,false,true,{x:orbit.tgt.x,z:orbit.tgt.z});
+    }
+  },360);
+}
+async function loadBasemap(kind,extentOverride,frameCloseOn,keepView,centerLocal){
   const B=BASEMAPS[kind]; if(!B)return;
   markBaseLoading(kind);
   try{
-    const k=2,span=2*k+1,latRad=home.lat*Math.PI/180;
-    // tile zoom adattivo: copertura ~1.6x il raggio zone (o override per "Dettaglio")
+    const k=2,span=2*k+1;
+    // centro del mosaico: Home (default) o il punto inquadrato (per il LOD su zoom/pan)
+    const ctr=centerLocal||{x:0,z:0};
+    const cgeo=(ctr.x||ctr.z)?toGPS(ctr.x,ctr.z):{lat:home.lat,lon:home.lon};
+    const latRad=cgeo.lat*Math.PI/180;
+    // tile zoom adattivo: copertura ~1.6x il raggio zone, oppure legato alla distanza camera (LOD)
     const targetExtent=clamp(extentOverride||ZONE_MAXDIST*1.6,900,180000);
     let z=Math.round(Math.log2(span*256*156543.03392*Math.cos(latRad)/targetExtent));
-    z=clamp(z,9,18); const n=2**z;
-    const fx=(home.lon+180)/360*n, fy=(1-Math.asinh(Math.tan(latRad))/Math.PI)/2*n;
+    z=clamp(z,9,20); const n=2**z;
+    const fx=(cgeo.lon+180)/360*n, fy=(1-Math.asinh(Math.tan(latRad))/Math.PI)/2*n;
     const xc=Math.floor(fx),yc=Math.floor(fy),total=span*256;
     const res=156543.03392*Math.cos(latRad)/n;
     const cnv=document.createElement('canvas');cnv.width=total;cnv.height=total;
@@ -814,27 +841,37 @@ async function loadBasemap(kind,extentOverride,frameCloseOn){
     await Promise.race([Promise.all(jobs),new Promise(r=>setTimeout(r,9000))]);
     if(ok===0)throw new Error('nessun tile (rete bloccata)');
     const tex=new THREE.CanvasTexture(cnv); tex.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||4;
+    tex.minFilter=THREE.LinearFilter; tex.generateMipmaps=false;   // niente mipmap = massima nitidezza in primo piano (e PoT-safe)
     const worldSize=total*res;
-    const hpx=(fx-(xc-k))*256,hpy=(fy-(yc-k))*256;
-    const eastOff=(hpx-total/2)*res, northOff=(total/2-hpy)*res;
+    // posiziona il piano così che il punto geografico centrale cada esattamente sulle sue coord locali
+    const cl=fromGPS(cgeo.lat,cgeo.lon);
+    const cpx=(fx-(xc-k))*256, cpy=(fy-(yc-k))*256;
     if(satPlane){scene.remove(satPlane);satPlane.material.map?.dispose();}
     const geo=new THREE.PlaneGeometry(worldSize,worldSize);geo.rotateX(-Math.PI/2);
     const mat = kind==='map' ? new THREE.MeshBasicMaterial({map:tex}) : new THREE.MeshStandardMaterial({map:tex,roughness:1});
     satPlane=new THREE.Mesh(geo,mat);
-    satPlane.position.set(-eastOff,0.05,northOff); satPlane.receiveShadow=(kind!=='map'); scene.add(satPlane);
-    terrain.visible=false;grid.visible=false;proceduralGroup.visible=false;groundMesh=satPlane;WORLD.size=worldSize;
-    // adatta camera/fog/zoom-out all'estensione del mondo, così le zone lontane sono visibili
-    const far=Math.max(8000,worldSize*4);
-    cam.far=far;fpvCam.far=far;cam.updateProjectionMatrix();fpvCam.updateProjectionMatrix();
-    scene.fog = worldSize>6000 ? null : new THREE.FogExp2(0x0a1018,0.0014);
-    orbit.maxDist=Math.max(2500,worldSize*1.4);
-    if(frameCloseOn)frameClose(); else frameHome(worldSize);
+    satPlane.position.set(cl.x-(cpx-total/2)*res,0.05,cl.z-(cpy-total/2)*res); satPlane.receiveShadow=(kind!=='map'); scene.add(satPlane);
+    terrain.visible=false;grid.visible=false;proceduralGroup.visible=false;groundMesh=satPlane;
+    lastLoadedZ=z; loadedCenter={x:ctr.x,z:ctr.z}; loadedWorld=worldSize;
+    if(!keepView){
+      WORLD.size=worldSize;
+      // adatta camera/fog/zoom-out all'estensione del mondo, così le zone lontane sono visibili
+      const far=Math.max(8000,worldSize*4);
+      cam.far=far;fpvCam.far=far;cam.updateProjectionMatrix();fpvCam.updateProjectionMatrix();
+      scene.fog = worldSize>6000 ? null : new THREE.FogExp2(0x0a1018,0.0014);
+      orbit.maxDist=Math.max(2500,worldSize*1.4);
+      if(frameCloseOn)frameClose(); else frameHome(worldSize);
+    } else {
+      // ricarico LOD: non toccare la camera, non rimpicciolire il far plane
+      const far=Math.max(cam.far,8000,worldSize*4);
+      cam.far=far;fpvCam.far=far;cam.updateProjectionMatrix();fpvCam.updateProjectionMatrix();
+    }
     $('attrib').textContent=B.attr;$('attrib').style.display='block';
     currentBase=kind; markBase();
     relocalizeZones();
-    toast((kind==='sat'?'Satellite':'Mappa')+' caricata ('+ok+'/'+(span*span)+' tile)');
+    if(!keepView)toast((kind==='sat'?'Satellite':'Mappa')+' caricata ('+ok+'/'+(span*span)+' tile)');
   }catch(err){
-    toast((kind==='sat'?'Satellite':'Mappa')+' non disponibile — '+err.message);
+    if(!keepView)toast((kind==='sat'?'Satellite':'Mappa')+' non disponibile — '+err.message);
     markBase();
   }
 }
@@ -1030,6 +1067,7 @@ function focusZone(z){
   orbit.tgt.set(cx,0,cz);
   orbit.dist=clamp(rad*2.4,200,orbit.maxDist||2500);
   zoneSel=z.name; buildZones();
+  scheduleLOD();   // ricarica i tile centrati sulla zona, alla risoluzione giusta
   toast('Zona: '+z.name);
 }
 function renderZoneList(){
