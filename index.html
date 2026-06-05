@@ -227,8 +227,8 @@
         <label class="field" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px">
           <input type="checkbox" id="zoneToggle" checked style="width:auto"> <span style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em">Mostra zone sulla mappa</span>
         </label>
-        <div class="field"><label>Raggio zone adiacenti <b id="zoneRadL">20 km</b></label>
-          <input type="range" id="zoneRad" min="5" max="100" step="1" value="20">
+        <div class="field"><label>Zoom mappa <b id="mapZoomL">—</b></label>
+          <input type="range" id="mapZoom" min="0" max="1000" step="1" value="500">
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:4px">
           <span style="color:var(--faint)">QUOTA MAX AGL:</span>
@@ -544,12 +544,23 @@ function rebuildPOI(){
 }
 
 /* orbit camera */
-const orbit={tgt:new THREE.Vector3(0,20,0),dist:240,az:0.7,pol:0.95,drag:false,px:0,py:0,maxDist:2500};
+const orbit={tgt:new THREE.Vector3(0,20,0),dist:240,az:0.7,pol:0.95,drag:false,px:0,py:0,maxDist:2500,minDist:50};
 function applyOrbit(){const x=orbit.tgt.x+orbit.dist*Math.sin(orbit.pol)*Math.cos(orbit.az),y=orbit.tgt.y+orbit.dist*Math.cos(orbit.pol),z=orbit.tgt.z+orbit.dist*Math.sin(orbit.pol)*Math.sin(orbit.az);cam.position.set(x,y,z);cam.lookAt(orbit.tgt);}
 canvas.addEventListener('pointerdown',e=>{if(camMode==='orbit'){orbit.drag=true;orbit.px=e.clientX;orbit.py=e.clientY;}});
 addEventListener('pointerup',()=>orbit.drag=false);
 addEventListener('pointermove',e=>{if(!orbit.drag)return;orbit.az-=(e.clientX-orbit.px)*0.005;orbit.pol=clamp(orbit.pol-(e.clientY-orbit.py)*0.005,0.12,1.45);orbit.px=e.clientX;orbit.py=e.clientY;});
-canvas.addEventListener('wheel',e=>{if(camMode!=='orbit')return;e.preventDefault();orbit.dist=clamp(orbit.dist*(1+Math.sign(e.deltaY)*0.1),50,orbit.maxDist||2500);scheduleLOD();},{passive:false});
+canvas.addEventListener('wheel',e=>{if(camMode!=='orbit')return;e.preventDefault();orbit.dist=clamp(orbit.dist*(1+Math.sign(e.deltaY)*0.1),orbit.minDist||50,orbit.maxDist||2500);syncZoom();scheduleLOD();scheduleZones();},{passive:false});
+/* ===== ZOOM MAPPA: slider ↔ orbit.dist (curva logaritmica), sincronizzato con la rotella ===== */
+function fmtDist(d){return d>=1000?(d/1000).toFixed(d<10000?1:0)+' km':Math.round(d)+' m';}
+function sliderToDist(v){const lo=orbit.minDist||50,hi=Math.max(lo*1.2,orbit.maxDist||2500);return lo*Math.pow(hi/lo,clamp(v,0,1000)/1000);}
+function distToSlider(d){const lo=orbit.minDist||50,hi=Math.max(lo*1.2,orbit.maxDist||2500);return Math.round(1000*Math.log(clamp(d,lo,hi)/lo)/Math.log(hi/lo));}
+function syncZoom(){const s=$('mapZoom'); if(s)s.value=distToSlider(orbit.dist); const l=$('mapZoomL'); if(l)l.textContent=fmtDist(clamp(orbit.dist,orbit.minDist||50,orbit.maxDist||2500));}
+// rifiltra le zone DISEGNATE in base all'inquadratura (debounce); il floor di sicurezza resta in selectNearby
+let zoneTimer=null,lastSelDist=0,lastSelTgt={x:0,z:0};
+function scheduleZones(){ if(!allZones.length)return; clearTimeout(zoneTimer); zoneTimer=setTimeout(()=>{ if(!allZones.length)return;
+  const dd=Math.abs(orbit.dist-lastSelDist)/Math.max(1,lastSelDist), mv=Math.hypot(orbit.tgt.x-lastSelTgt.x,orbit.tgt.z-lastSelTgt.z);
+  if(dd>0.2||mv>Math.max(300,(loadedWorld||2400)*0.15))selectNearby(); },320); }
+$('mapZoom').addEventListener('input',e=>{ orbit.dist=clamp(sliderToDist(+e.target.value),orbit.minDist||50,orbit.maxDist||2500); const l=$('mapZoomL'); if(l)l.textContent=fmtDist(orbit.dist); scheduleLOD(); scheduleZones(); });
 
 /* raycast click */
 const ray=new THREE.Raycaster(),mouse=new THREE.Vector2();let downPos=null;
@@ -874,8 +885,9 @@ function removeSatellite(){
   terrain.visible=true;grid.visible=true;proceduralGroup.visible=true;groundMesh=terrain;WORLD.size=2400;
   cam.far=8000;fpvCam.far=8000;cam.updateProjectionMatrix();fpvCam.updateProjectionMatrix();
   scene.fog=new THREE.FogExp2(0x0a1018,0.0014);
-  orbit.maxDist=2500; orbit.dist=Math.min(orbit.dist,2500);
+  orbit.maxDist=2500; orbit.minDist=50; orbit.dist=Math.min(orbit.dist,2500);   // terreno procedurale: nessun limite di nitidezza tile
   lastLoadedZ=null;
+  syncZoom();
   $('attrib').style.display='none';
   relocalizeZones();
 }
@@ -927,6 +939,10 @@ async function loadBasemap(kind,extentOverride,frameCloseOn,keepView,centerLocal
     scene.background=NEUTRAL_BG;
     terrain.visible=false;grid.visible=false;proceduralGroup.visible=false;groundMesh=satPlane;
     lastLoadedZ=z; loadedCenter={x:ctr.x,z:ctr.z}; loadedWorld=worldSize;
+    // NITIDEZZA: limita lo zoom-in al punto in cui i tile restano nativi (z max=20). Oltre, non c'è
+    // dettaglio Esri: fermare la camera lì evita di stirare la texture creando l'effetto "sciolto".
+    const res20=156543.03392*Math.cos(home.lat*Math.PI/180)/1048576; // m/px allo zoom-tile 20 (max Esri)
+    orbit.minDist=Math.max(50, SPAN_TILES*256*res20*0.75);   // ~1:1 texel↔pixel a z20 ⇒ immagine a fuoco, niente upscaling visibile
     if(!keepView){
       WORLD.size=worldSize;
       const far=Math.max(8000,worldSize*3);
@@ -939,6 +955,7 @@ async function loadBasemap(kind,extentOverride,frameCloseOn,keepView,centerLocal
       const far=Math.max(cam.far,8000,worldSize*3);
       cam.far=far;fpvCam.far=far;cam.updateProjectionMatrix();fpvCam.updateProjectionMatrix();
     }
+    orbit.dist=clamp(orbit.dist,orbit.minDist,orbit.maxDist); syncZoom();
     $('attrib').textContent=B.attr;$('attrib').style.display='block';
     currentBase=kind; markBase();
     relocalizeZones();
@@ -955,7 +972,7 @@ let dfZones=[];                 // zones currently shown (near Home), projected 
 let allZones=[];                // full parsed dataset (geo only), re-filtered when Home moves
 let zoneMeta={versionStr:null,versionDate:null,savedAt:null};
 let zoneSel=null;
-let ZONE_MAXDIST=20000; const ZONE_CAP=800; let dfBuiltRadius=0;   // raggio effettivo con cui dfZones è stato costruito (per il floor di sicurezza)
+let ZONE_MAXDIST=20000; const ZONE_CAP=800; const ZONE_DRAW_CAP=350; let dfBuiltRadius=0;   // ZONE_CAP=set d'analisi; ZONE_DRAW_CAP=max zone triangolate (fluidità Milano); dfBuiltRadius=copertura attuale (floor sicurezza)
 function restrInfo(r){r=(r||'').toUpperCase();
   if(/PROHIB|NO_FLY|NOFLY|FORBID|INTERD/.test(r))return{color:0xff5a6a,word:'VIETATO',note:'Volo non consentito'};
   if(/DANGER|HAZARD|PERIC/.test(r))return{color:0xff5a6a,word:'PERICOLO',note:'Area pericolosa',danger:true};
@@ -1044,12 +1061,8 @@ $('zoneFile').addEventListener('change',e=>{const f=e.target.files[0];if(f)loadZ
 $('zoneToggle').addEventListener('change',e=>{zoneGroup.visible=e.target.checked;});
 $('zoneRemember').addEventListener('change',e=>{ if(!e.target.checked)idbDel('ed269').catch(()=>{}); });
 $('zoneForget').onclick=()=>{ idbDel('ed269').catch(()=>{}); allZones=[];dfZones=[];zoneMeta={versionStr:null,versionDate:null,savedAt:null}; buildZones();checkZones();renderWpList();updateZoneMetaUI(); toast('File zone dimenticato'); };
-// slider raggio zone: aggiorno l'etichetta in tempo reale (input), ricostruisco SOLO al rilascio (change).
-// Disaccoppiato dalla basemap: i tile seguono la camera (LOD), lo slider tocca solo le zone D-Flight.
-$('zoneRad').addEventListener('input',e=>{ ZONE_MAXDIST=(+e.target.value)*1000; $('zoneRadL').textContent=(+e.target.value)+' km'; });
-$('zoneRad').addEventListener('change',e=>{ ZONE_MAXDIST=(+e.target.value)*1000; $('zoneRadL').textContent=(+e.target.value)+' km';
-  if(allZones.length){ selectNearby(); toast(dfZones.length+' zone (raggio '+(+e.target.value)+' km)'); }
-});
+// (il controllo del raggio è stato sostituito dallo zoom mappa; le zone si caricano in automatico
+//  in base all'inquadratura, con floor di sicurezza sull'intera missione — vedi selectNearby/scheduleZones)
 async function bytesToText(buf,name){
   const nm=name.toLowerCase();
   if(nm.endsWith('.gz')){
@@ -1162,25 +1175,32 @@ function parseED269(data){
 }
 function selectNearby(){
   const cosLat=Math.cos(home.lat*Math.PI/180);
-  // floor di sicurezza: il set di analisi copre SEMPRE l'intera missione (home + tutti i waypoint),
-  // a prescindere dallo slider → un waypoint dentro una zona lontana resta sempre controllato.
+  // zone DISEGNATE = inquadratura: raggio attorno al TARGET camera, cresce con la distanza (zoom out ⇒ più zone)
+  const drawR=clamp(orbit.dist*1.3,1500,140000);
+  const tgtGeo=toGPS(orbit.tgt.x,orbit.tgt.z), cosT=Math.cos(tgtGeo.lat*Math.PI/180);
+  // zone CONTROLLATE = floor di sicurezza: copre SEMPRE home + TUTTI i waypoint, a prescindere dallo zoom
   let missionR=0; for(const w of waypoints){const d=Math.hypot(w.x,w.z); if(d>missionR)missionR=d;}
-  const effR=Math.max(ZONE_MAXDIST, missionR>0?missionR+2000:0); dfBuiltRadius=effR;
-  // B13 — distanza Home→bbox per TUTTE le zone entro raggio, poi ordina e tronca al cap: tieni le più vicine
-  const cands=[];
+  const ctrlR=Math.max(missionR>0?missionR+2000:0,1500);
+  dfBuiltRadius=ctrlR; lastSelDist=orbit.dist; lastSelTgt={x:orbit.tgt.x,z:orbit.tgt.z};
+  const list=[];
   for(const z of allZones){
-    // distance from Home to the zone bounding box (0 if Home inside)
-    const cl=Math.max(z.bbox[0],Math.min(home.lon,z.bbox[2])), ca=Math.max(z.bbox[1],Math.min(home.lat,z.bbox[3]));
-    const dE=(home.lon-cl)*111320*cosLat, dN=(home.lat-ca)*111320;
-    const d=Math.hypot(dE,dN);
-    if(d>effR)continue;
-    cands.push({z,d});
+    // distanza bbox dalla Home (controllo) e dal target camera (disegno) — 0 se il punto è dentro la bbox
+    const clH=Math.max(z.bbox[0],Math.min(home.lon,z.bbox[2])), caH=Math.max(z.bbox[1],Math.min(home.lat,z.bbox[3]));
+    const dH=Math.hypot((home.lon-clH)*111320*cosLat,(home.lat-caH)*111320);
+    const clT=Math.max(z.bbox[0],Math.min(tgtGeo.lon,z.bbox[2])), caT=Math.max(z.bbox[1],Math.min(tgtGeo.lat,z.bbox[3]));
+    const dT=Math.hypot((tgtGeo.lon-clT)*111320*cosT,(tgtGeo.lat-caT)*111320);
+    const ctrl=dH<=ctrlR, draw=dT<=drawR;
+    if(ctrl||draw) list.push({z,dH,dT,ctrl,draw});
   }
-  cands.sort((a,b)=>a.d-b.d);
-  if(cands.length>ZONE_CAP)cands.length=ZONE_CAP;
-  dfZones=cands.map(({z})=>{
+  // priorità al set di controllo (sicurezza), poi vicinanza; cap d'analisi per limitare i point-in-poly
+  list.sort((a,b)=>{ if(a.ctrl!==b.ctrl)return a.ctrl?-1:1; return (a.ctrl?a.dH-b.dH:a.dT-b.dT); });
+  if(list.length>ZONE_CAP)list.length=ZONE_CAP;
+  let drawn=0;
+  dfZones=list.map(it=>{
+    const z=it.z;
     const local=z.gpolys.map(poly=>({outer:poly.outer.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}),holes:poly.holes.map(h=>h.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}))}));
-    return Object.assign({},z,{polys:local});
+    const _draw=it.draw && drawn<ZONE_DRAW_CAP; if(_draw)drawn++;       // solo le inquadrate (cap) vengono triangolate
+    return Object.assign({},z,{polys:local,_draw,_dT:it.dT});
   });
   buildZones(); checkZones(); renderWpList();
 }
@@ -1201,6 +1221,7 @@ function cleanRing(ring){
 function buildZones(){
   while(zoneGroup.children.length){const c=zoneGroup.children[0];zoneGroup.remove(c);c.geometry&&c.geometry.dispose();c.material&&c.material.dispose();}
   dfZones.forEach(z=>{
+    if(!z._draw)return;   // disegna SOLO le zone inquadrate; le altre restano nel set di controllo (checkZones)
     const sel=(z.name===zoneSel);
     const active=isZoneActiveNow(z);
     const danger=!!restrInfo(z.restriction).danger;
@@ -1231,12 +1252,14 @@ function frameHome(worldSize){
   camMode='orbit'; document.querySelectorAll('.vbadge button[data-cam]').forEach(x=>x.classList.toggle('active',x.dataset.cam==='orbit'));
   orbit.tgt.set(0,0,0); orbit.az=0; orbit.pol=0.30;
   const ws=worldSize||WORLD.size||2400;
-  orbit.dist=clamp(ws*0.62,200,orbit.maxDist||2500);
+  orbit.dist=clamp(ws*0.62,orbit.minDist||200,orbit.maxDist||2500);
+  syncZoom(); scheduleZones();
 }
 function frameClose(){
   camMode='orbit'; document.querySelectorAll('.vbadge button[data-cam]').forEach(x=>x.classList.toggle('active',x.dataset.cam==='orbit'));
   zoneSel=null; if(allZones.length)buildZones();
-  orbit.tgt.set(0,8,0); orbit.az=0.6; orbit.pol=0.62; orbit.dist=90;
+  orbit.tgt.set(0,8,0); orbit.az=0.6; orbit.pol=0.62; orbit.dist=clamp(90,orbit.minDist||50,orbit.maxDist||2500);
+  syncZoom(); scheduleZones();
 }
 function focusZone(z){
   let sx=0,sz=0,c=0,minx=1e9,minz=1e9,maxx=-1e9,maxz=-1e9;
@@ -1246,17 +1269,18 @@ function focusZone(z){
   camMode='orbit'; document.querySelectorAll('.vbadge button[data-cam]').forEach(x=>x.classList.toggle('active',x.dataset.cam==='orbit'));
   // SOLO pan + zoom: mantieni l'orientamento attuale (niente vista storta)
   orbit.tgt.set(cx,0,cz);
-  orbit.dist=clamp(rad*2.4,200,orbit.maxDist||2500);
+  orbit.dist=clamp(rad*2.4,orbit.minDist||200,orbit.maxDist||2500);
   zoneSel=z.name; buildZones();
-  scheduleLOD();   // ricarica i tile centrati sulla zona, alla risoluzione giusta
+  syncZoom(); scheduleLOD(); scheduleZones();   // ricarica i tile centrati sulla zona + rifiltra le zone inquadrate
   toast('Zona: '+z.name);
 }
 function renderZoneList(){
-  $('zoneCount').textContent=dfZones.length;
+  const drawnZones=dfZones.filter(z=>z._draw).sort((a,b)=>(a._dT||0)-(b._dT||0));   // zone inquadrate, più vicine prima
+  $('zoneCount').textContent=drawnZones.length;
   const L=$('zoneList');
-  if(!dfZones.length){L.innerHTML='<div class="empty">'+(allZones.length?('Nessuna zona entro '+(ZONE_MAXDIST/1000)+' km da questa Home. Aumenta il raggio o sposta la Home.'):'Carica il file ED-269 (scaricabile da d-flight solo da Operatori BASE/PRO con abbonamento attivo).')+'</div>';return;}
+  if(!drawnZones.length){L.innerHTML='<div class="empty">'+(allZones.length?('Nessuna zona nell\'inquadratura. Allarga lo zoom mappa per vederne di più (i waypoint restano sempre controllati).'):'Carica il file ED-269 (scaricabile da d-flight solo da Operatori BASE/PRO con abbonamento attivo).')+'</div>';return;}
   L.innerHTML='';
-  dfZones.slice(0,150).forEach(z=>{
+  drawnZones.slice(0,150).forEach(z=>{
     const ri=restrInfo(z.restriction), pcol='#'+ri.color.toString(16).padStart(6,'0'), acol='#'+(z.color>>>0).toString(16).padStart(6,'0');
     const el=document.createElement('div');el.className='wp';el.style.cursor='pointer';el.title='Mostra sulla mappa';
     const act=isZoneActiveNow(z), val=fmtApplicability(z);
@@ -1639,7 +1663,7 @@ ${waypoints.map(placemark).join('\n')}
 }
 
 /* ===================== INIT ===================== */
-renderPresets();selPreset('custom');renderDjiModels();updateWpmlDesc();syncSliders();updateSurveyInfo();updateOrbStat();updateCorrStat();resize();resetTelem();renderWpList();
+renderPresets();selPreset('custom');renderDjiModels();updateWpmlDesc();syncSliders();updateSurveyInfo();updateOrbStat();updateCorrStat();resize();resetTelem();renderWpList();syncZoom();
 tryRestoreZones();
 
 /* ---- startup disclaimer gate ---- */
