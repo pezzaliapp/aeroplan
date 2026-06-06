@@ -1,5 +1,5 @@
 # AeroPlan — Drone Flight Planner & Simulator
-**by pezzaliAPP — © Alessandro Pezzali (PezzaliApp)**
+**© Alessandro Pezzali — pezzaliApp**
 
 Simulatore 3D, configuratore e pianificatore di volo drone, eseguibile interamente nel browser (nessun backend). Pianifica waypoint, POI/orbite, griglie fotogrammetriche e corridor mapping, simula il volo con telemetria live, ed esporta missioni nei formati dei droni reali. All'avvio mostra un avviso di responsabilità che va accettato prima dell'uso.
 
@@ -56,9 +56,9 @@ Con "Ricorda offline" il file resta salvato nel browser (IndexedDB) per le sessi
 Strumento di **pianificazione e simulazione**. Il WPML usa i valori ufficiali `droneEnumValue`/`payloadEnumValue` DJI, ma è supportato **solo dai droni Enterprise**; verifica sempre la missione in DJI Pilot 2 (RTH, no-fly zone, quota relativa) prima di volare. Le zone UAS possono non essere aggiornate. La responsabilità della pianificazione e del volo è esclusivamente del pilota/operatore, nel rispetto delle norme EASA/ENAC e della privacy.
 
 ## Licenza & crediti
-**© Alessandro Pezzali — PezzaliApp. Tutti i diritti riservati.**
-"AeroPlan" e il marchio **pezzaliAPP** sono di proprietà di Alessandro Pezzali. Vedi il file [`LICENSE`](LICENSE) per i termini d'uso.
+**© Alessandro Pezzali — pezzaliApp. Tutti i diritti riservati.**
+"AeroPlan" e il marchio **pezzaliApp** sono di proprietà di Alessandro Pezzali. Vedi il file [`LICENSE`](LICENSE) per i termini d'uso.
 
 Crediti tecnici: [Three.js](https://threejs.org), [JSZip](https://stuk.github.io/jszip/), imagery © Esri / Maxar / Earthstar Geographics, mappa © Esri / HERE / Garmin / OpenStreetMap contributors, zone UAS © d-flight S.p.A. (Gruppo ENAV).
 
-— *Made by pezzaliAPP · [pezzaliapp.com](https://pezzaliapp.com)*
+— *© Alessandro Pezzali — pezzaliApp · [pezzaliapp.com](https://pezzaliapp.com)*
