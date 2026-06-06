@@ -263,6 +263,11 @@
         </div>
 
         <div class="toolblock">
+          <div class="tt">Waypoint</div>
+          <div class="field"><label>Quota nuovi punti <b id="wpAL">40m</b></label><input type="range" id="wpA" min="5" max="120" step="5" value="40"></div>
+        </div>
+
+        <div class="toolblock">
           <div class="tt">Orbita attorno al POI <span id="orbStat" class="chip" style="display:none">no POI</span></div>
           <div class="row3">
             <div class="field"><label>Raggio <b id="orbRL">60m</b></label><input type="range" id="orbR" min="10" max="300" step="5" value="60"></div>
@@ -580,7 +585,7 @@ canvas.addEventListener('pointerup',e=>{
   showZoneTipAt(e.clientX,e.clientY,p.x,p.z,true);   // Fix 3 — su tap (mobile e desktop) mostra info zona al punto toccato
   if(tool==='poi'){ poi={x:+p.x.toFixed(1),z:+p.z.toFixed(1),alt:0}; rebuildPOI(); updateOrbStat(); toast('POI posizionato'); return; }
   if(tool==='corridor'){ corridorPath.push({x:+p.x.toFixed(1),z:+p.z.toFixed(1)}); rebuildCorridor(); updateCorrStat(); toast('Punto percorso '+corridorPath.length); return; }
-  waypoints.push({x:+p.x.toFixed(1),z:+p.z.toFixed(1),alt:clamp(40,5,cfg.aMax),speed:Math.min(8,cfg.vMax),head:0,hover:0,gimbal:-30,action:'photo',headingMode:'smooth',kind:'wp'});
+  waypoints.push({x:+p.x.toFixed(1),z:+p.z.toFixed(1),alt:clamp(+$('wpA').value,5,cfg.aMax),speed:Math.min(8,cfg.vMax),head:0,hover:0,gimbal:-30,action:'photo',headingMode:'smooth',kind:'wp'});
   selected=waypoints.length-1; syncHeadings(); rebuildWaypoints(); renderWpList(); toast('Waypoint '+waypoints.length);
 });
 
@@ -690,7 +695,7 @@ function updateOrbStat(){const c=$('orbStat');c.style.display=poi?'none':'inline
 function updateCorrStat(){const c=$('corrStat');c.style.display=corridorPath.length>1?'none':'inline-block';}
 
 /* orbit/survey sliders */
-[['orbR','m','orbRL'],['orbA','m','orbAL'],['orbN','','orbNL'],['svW','','svWL'],['svH','','svHL'],['svA','m','svAL'],['svRot','°','svRotL'],['svFo','%','svFoL'],['svSo','%','svSoL'],['corrW','m','corrWL'],['corrA','m','corrAL'],['corrFo','%','corrFoL'],['corrSo','%','corrSoL']].forEach(([k,u,l])=>{
+[['wpA','m','wpAL'],['orbR','m','orbRL'],['orbA','m','orbAL'],['orbN','','orbNL'],['svW','','svWL'],['svH','','svHL'],['svA','m','svAL'],['svRot','°','svRotL'],['svFo','%','svFoL'],['svSo','%','svSoL'],['corrW','m','corrWL'],['corrA','m','corrAL'],['corrFo','%','corrFoL'],['corrSo','%','corrSoL']].forEach(([k,u,l])=>{
   $(k).addEventListener('input',e=>{$(l).textContent=e.target.value+u;if(k.startsWith('sv'))updateSurveyInfo();});
 });
 function camFootprint(alt){return 2*alt*Math.tan((cfg.fov*Math.PI/180)/2);}
