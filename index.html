@@ -818,10 +818,14 @@ function renderWpList(){
 }
 function updateMissionStats(){
   if(!waypoints.length){$('missionStats').textContent='';return;}
-  const pts=[{x:0,z:0,alt:3},...waypoints];let dist=0,t=0;
+  const pts=[{x:0,z:0,alt:3},...waypoints,{x:0,z:0,alt:3,speed:cfg.vMax}];let dist=0,t=0;
   for(let i=1;i<pts.length;i++){const d=Math.hypot(pts[i].x-pts[i-1].x,pts[i].z-pts[i-1].z,pts[i].alt-pts[i-1].alt);dist+=d;t+=d/Math.max(1,pts[i].speed||cfg.vMax/2)+(waypoints[i-1]?.hover||0);}
   const mm=Math.floor(t/60),ss=Math.floor(t%60),battUse=(t/60)/cfg.batt*100;
-  $('missionStats').innerHTML=`Distanza <b style="color:var(--cyan)">${dist.toFixed(0)}m</b> · Durata <b style="color:var(--cyan)">${mm}:${String(ss).padStart(2,'0')}</b> · Batteria <b style="color:${battUse>80?'var(--red)':'var(--amber)'}">~${battUse.toFixed(0)}%</b>`;
+  const RESERVE=25; // % di riserva di sicurezza per il rientro
+  let battCol='var(--amber)',battWarn='';
+  if(battUse>100){battCol='var(--red)';battWarn=` · ⚠ batteria insufficiente per missione + rientro`;}
+  else if(battUse>100-RESERVE){battCol='var(--red)';battWarn=` · ⚠ intacca la riserva (${RESERVE}%)`;}
+  $('missionStats').innerHTML=`Distanza <b style="color:var(--cyan)">${dist.toFixed(0)}m</b> · Durata <b style="color:var(--cyan)">${mm}:${String(ss).padStart(2,'0')}</b> · Batteria <b style="color:${battCol}">~${battUse.toFixed(0)}%</b><b style="color:var(--red)">${battWarn}</b>`;
 }
 
 /* ===================== SATELLITE ===================== */
