@@ -1094,6 +1094,13 @@ $('zoneOpenDflight').onclick=()=>window.open('https://www.d-flight.it/web-app/',
 $('zoneImportBtn').onclick=()=>$('zoneFile').click();
 $('zoneFile').addEventListener('change',e=>{const f=e.target.files[0];if(f)loadZoneFile(f);e.target.value='';});
 $('zoneToggle').addEventListener('change',e=>{zoneGroup.visible=e.target.checked;});
+// EVENT DELEGATION: un solo listener sul contenitore lista, robusto ai re-render delle righe
+// (renderZoneList ricrea i nodi .wp ⇒ un onclick per-riga non sopravvive). Ricava la zona dal data-uid.
+$('zoneList').addEventListener('click',e=>{
+  const row=e.target.closest('.wp'); if(!row||row.dataset.uid===undefined)return;
+  const uid=+row.dataset.uid, z=dfZones.find(z=>z._uid===uid);
+  if(z)selectZoneFromList(z);
+});
 $('zoneRemember').addEventListener('change',e=>{ if(!e.target.checked)idbDel('ed269').catch(()=>{}); });
 $('zoneForget').onclick=()=>{ idbDel('ed269').catch(()=>{}); allZones=[];dfZones=[];zoneMeta={versionStr:null,versionDate:null,savedAt:null}; buildZones();checkZones();renderWpList();updateZoneMetaUI(); toast('File zone dimenticato'); };
 // (il controllo del raggio è stato sostituito dallo zoom mappa; le zone si caricano in automatico
@@ -1337,14 +1344,13 @@ function renderZoneList(){
   L.innerHTML='';
   drawnZones.slice(0,150).forEach(z=>{
     const ri=restrInfo(z.restriction), pcol='#'+ri.color.toString(16).padStart(6,'0'), acol='#'+(z.color>>>0).toString(16).padStart(6,'0');
-    const el=document.createElement('div');el.className='wp'+(z._uid===zoneSel?' sel':'');el.style.cursor='pointer';el.title=(z._uid===zoneSel?'Clic = deseleziona':'Clic = evidenzia sulla mappa');
+    const el=document.createElement('div');el.className='wp'+(z._uid===zoneSel?' sel':'');el.dataset.uid=z._uid;el.style.cursor='pointer';el.title=(z._uid===zoneSel?'Clic = deseleziona':'Clic = evidenzia sulla mappa');
     const act=isZoneActiveNow(z), val=fmtApplicability(z);
     el.innerHTML=`<div class="h"><div class="idx"><span class="num" style="background:${acol};width:10px;height:10px"></span> ${z.name}</div><span style="color:var(--faint);font-size:11px">📍</span></div>
       <div class="meta"><span style="color:${pcol};font-weight:700">${ri.word}</span><span>max ${z.upper!=null?z.upper+' '+z.uom+' '+(z.datum||'AGL'):'— quota n.d.'}</span>${z.dynamic?'<span style="color:var(--violet)">⟜ dinamica</span>':''}</div>
       <div class="meta"><span style="color:var(--faint)">${ri.note}</span></div>
       ${(z.dynamic||val)?`<div class="meta"><span style="color:${act?'var(--cyan)':'var(--faint)'}">🕒 ${act?'attiva ora':'NON attiva ora'}${val?' · '+val:' · validità non indicata'}</span></div>`:''}`;
-    el.onclick=()=>selectZoneFromList(z);
-    L.appendChild(el);
+    L.appendChild(el);   // niente onclick per-riga: gestito via delega sul contenitore (sopravvive ai re-render)
   });
 }
 function pointInPoly(x,z,ring){let inside=false;for(let i=0,j=ring.length-1;i<ring.length;j=i++){const xi=ring[i].x,zi=ring[i].z,xj=ring[j].x,zj=ring[j].z;if(((zi>z)!=(zj>z))&&(x<(xj-xi)*(z-zi)/(zj-zi)+xi))inside=!inside;}return inside;}
