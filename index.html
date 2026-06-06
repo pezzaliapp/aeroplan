@@ -1214,7 +1214,7 @@ function parseED269(data){
     // bounding box over all rings (for proximity test independent of Home)
     let minLon=Infinity,minLat=Infinity,maxLon=-Infinity,maxLat=-Infinity;
     polys.forEach(P=>P.outer.forEach(p=>{if(p[0]<minLon)minLon=p[0];if(p[0]>maxLon)maxLon=p[0];if(p[1]<minLat)minLat=p[1];if(p[1]>maxLat)maxLat=p[1];}));
-    allZones.push({name,restriction,color:zoneFillColor(restriction,upM),lower,upper,upperM:upM,uom,datum,applicability:apArr,dynamic,gpolys:polys,bbox:[minLon,minLat,maxLon,maxLat]});
+    allZones.push({_uid:allZones.length,name,restriction,color:zoneFillColor(restriction,upM),lower,upper,upperM:upM,uom,datum,applicability:apArr,dynamic,gpolys:polys,bbox:[minLon,minLat,maxLon,maxLat]});   // _uid univoco stabile (i nomi NON sono univoci)
   }
 }
 function selectNearby(){
@@ -1266,7 +1266,7 @@ function buildZones(){
   while(zoneGroup.children.length){const c=zoneGroup.children[0];zoneGroup.remove(c);c.geometry&&c.geometry.dispose();c.material&&c.material.dispose();}
   dfZones.forEach(z=>{
     if(!z._draw)return;   // disegna SOLO le zone inquadrate; le altre restano nel set di controllo (checkZones)
-    const sel=(z.name===zoneSel);
+    const sel=(z._uid===zoneSel);   // match per ID univoco, non per nome (nomi duplicati a Civitanova)
     const active=isZoneActiveNow(z);
     const danger=!!restrInfo(z.restriction).danger;
     const bcol=sel?0xffffff:(active?z.color:0x5a6678);          // non attiva ⇒ grigia; selezionata ⇒ contorno bianco
@@ -1320,13 +1320,13 @@ function centerCameraOnZone(z){
   orbit.dist=clamp(rad*2.4,orbit.minDist||200,orbit.maxDist||2500);
   syncZoom(); scheduleLOD(); scheduleZones();   // ricarica i tile centrati sulla zona + rifiltra le zone inquadrate
 }
-function focusZone(z){ zoneSel=z.name; buildZones(); centerCameraOnZone(z); toast('Zona: '+z.name); }
-// clic su una riga della lista: imposta zoneSel, RIDISEGNA il fill pieno e CENTRA la camera (effetti espliciti)
+function focusZone(z){ zoneSel=z._uid; buildZones(); centerCameraOnZone(z); toast('Zona: '+z.name); }
+// clic su una riga della lista: imposta zoneSel (ID univoco), RIDISEGNA il fill pieno e CENTRA la camera (effetti espliciti)
 function selectZoneFromList(z){
-  if(zoneSel===z.name){ zoneSel=null; buildZones(); toast('Zona deselezionata'); return; }   // ri-clic = deseleziona
-  zoneSel=z.name;            // 1) selezione
+  if(zoneSel===z._uid){ zoneSel=null; buildZones(); toast('Zona deselezionata'); return; }   // ri-clic = deseleziona
+  zoneSel=z._uid;            // 1) selezione per ID univoco (anche con zone omonime)
   buildZones();              // 2) re-render: fill pieno (0.66) sulla zona selezionata, le altre sfumate
-  centerCameraOnZone(z);     // 3) centra la camera sulla zona
+  centerCameraOnZone(z);     // 3) centra la camera sulla zona cliccata (stesso oggetto)
   toast('Zona: '+z.name);
 }
 function renderZoneList(){
@@ -1337,7 +1337,7 @@ function renderZoneList(){
   L.innerHTML='';
   drawnZones.slice(0,150).forEach(z=>{
     const ri=restrInfo(z.restriction), pcol='#'+ri.color.toString(16).padStart(6,'0'), acol='#'+(z.color>>>0).toString(16).padStart(6,'0');
-    const el=document.createElement('div');el.className='wp'+(z.name===zoneSel?' sel':'');el.style.cursor='pointer';el.title=(z.name===zoneSel?'Clic = deseleziona':'Clic = evidenzia sulla mappa');
+    const el=document.createElement('div');el.className='wp'+(z._uid===zoneSel?' sel':'');el.style.cursor='pointer';el.title=(z._uid===zoneSel?'Clic = deseleziona':'Clic = evidenzia sulla mappa');
     const act=isZoneActiveNow(z), val=fmtApplicability(z);
     el.innerHTML=`<div class="h"><div class="idx"><span class="num" style="background:${acol};width:10px;height:10px"></span> ${z.name}</div><span style="color:var(--faint);font-size:11px">📍</span></div>
       <div class="meta"><span style="color:${pcol};font-weight:700">${ri.word}</span><span>max ${z.upper!=null?z.upper+' '+z.uom+' '+(z.datum||'AGL'):'— quota n.d.'}</span>${z.dynamic?'<span style="color:var(--violet)">⟜ dinamica</span>':''}</div>
