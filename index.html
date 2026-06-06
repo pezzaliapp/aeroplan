@@ -123,6 +123,7 @@
   .gauge .val{font-family:var(--mono);font-size:23px;font-weight:700;line-height:1.1;margin-top:3px}
   .gauge .un{font-size:11px;color:var(--dim);font-weight:400}
   .gauge.bat .val{color:var(--green)}.gauge.bat.warn .val{color:var(--amber)}.gauge.bat.crit .val{color:var(--red)}
+  .gauge.miss .val{color:var(--amber)}.gauge.miss.warn .val{color:var(--red)}
   .gauge .bar{height:3px;background:#243047;border-radius:2px;margin-top:6px;overflow:hidden}
   .gauge .bar i{display:block;height:100%;background:var(--cyan);transition:.2s}
   .gauge.bat .bar i{background:var(--green)}
@@ -355,6 +356,7 @@
     <div class="gauge"><div class="lab">Distanza Home</div><div class="val"><span id="tHome">0</span><span class="un"> m</span></div></div>
     <div class="gauge"><div class="lab">Tratta percorsa</div><div class="val"><span id="tTrav">0</span><span class="un"> m</span></div></div>
     <div class="gauge bat" id="tBatBox"><div class="lab">Batteria</div><div class="val"><span id="tBat">100</span><span class="un"> %</span></div><div class="bar"><i id="tBatBar" style="width:100%"></i></div></div>
+    <div class="gauge miss" id="tMissBox"><div class="lab">Missione</div><div class="val"><span id="tMiss">~0</span><span class="un"> %</span></div></div>
     <div class="gauge"><div class="lab">Tempo volo</div><div class="val"><span id="tTime">00:00</span></div></div>
     <div class="gauge"><div class="lab">ETA missione</div><div class="val"><span id="tEta">--:--</span></div></div>
   </div>
@@ -817,7 +819,7 @@ function renderWpList(){
   updateMissionStats();
 }
 function updateMissionStats(){
-  if(!waypoints.length){$('missionStats').textContent='';return;}
+  if(!waypoints.length){$('missionStats').textContent='';$('tMiss').textContent='~0';$('tMissBox').className='gauge miss';return;}
   const pts=[{x:0,z:0,alt:3},...waypoints,{x:0,z:0,alt:3,speed:cfg.vMax}];let dist=0,t=0;
   for(let i=1;i<pts.length;i++){const d=Math.hypot(pts[i].x-pts[i-1].x,pts[i].z-pts[i-1].z,pts[i].alt-pts[i-1].alt);dist+=d;t+=d/Math.max(1,pts[i].speed||cfg.vMax/2)+(waypoints[i-1]?.hover||0);}
   const mm=Math.floor(t/60),ss=Math.floor(t%60),battUse=(t/60)/cfg.batt*100;
@@ -826,6 +828,8 @@ function updateMissionStats(){
   if(battUse>100){battCol='var(--red)';battWarn=` · ⚠ batteria insufficiente per missione + rientro`;}
   else if(battUse>100-RESERVE){battCol='var(--red)';battWarn=` · ⚠ intacca la riserva (${RESERVE}%)`;}
   $('missionStats').innerHTML=`Distanza <b style="color:var(--cyan)">${dist.toFixed(0)}m</b> · Durata <b style="color:var(--cyan)">${mm}:${String(ss).padStart(2,'0')}</b> · Batteria <b style="color:${battCol}">~${battUse.toFixed(0)}%</b><b style="color:var(--red)">${battWarn}</b>`;
+  $('tMiss').textContent='~'+battUse.toFixed(0);
+  $('tMissBox').className='gauge miss'+(battUse>100-RESERVE?' warn':'');
 }
 
 /* ===================== SATELLITE ===================== */
@@ -1513,7 +1517,7 @@ $('simspeed').addEventListener('change',e=>simSpeed=+e.target.value);
 document.querySelectorAll('.vbadge button[data-cam]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.vbadge button[data-cam]').forEach(x=>x.classList.remove('active'));b.classList.add('active');camMode=b.dataset.cam;}));
 $('resetView').onclick=()=>{ zoneSel=null; if(allZones.length)buildZones(); frameHome(WORLD.size); toast('Vista ripristinata'); };
 $('detailView').onclick=()=>{ if(currentBase&&currentBase!=='proc'){ loadBasemap(currentBase,1200,true); toast('Dettaglio: mappa ad alta risoluzione'); } else { frameClose(); toast('Vista ravvicinata'); } };
-function resetTelem(){['tSpd','tAlt'].forEach(i=>$(i).textContent='0.0');['tHome','tTrav'].forEach(i=>$(i).textContent='0');$('tBat').textContent='100';$('tBatBar').style.width='100%';$('tTime').textContent='00:00';$('tEta').textContent='--:--';$('tBatBox').className='gauge bat';$('hAlt').textContent='0.0';$('hSpd').textContent='0.0';$('hDist').textContent='0';$('hWp').textContent='--';}
+function resetTelem(){['tSpd','tAlt'].forEach(i=>$(i).textContent='0.0');['tHome','tTrav'].forEach(i=>$(i).textContent='0');$('tBat').textContent='100';$('tBatBar').style.width='100%';$('tTime').textContent='00:00';$('tEta').textContent='--:--';$('tBatBox').className='gauge bat';$('hAlt').textContent='0.0';$('hSpd').textContent='0.0';$('hDist').textContent='0';$('hWp').textContent='--';updateMissionStats();}
 function fmtTime(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(Math.floor(s%60)).padStart(2,'0');}
 
 function resize(){const w=$('view').clientWidth||window.innerWidth,h=$('view').clientHeight||1;if(w<2||h<2)return;renderer.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix();fpvCam.aspect=w/h;fpvCam.updateProjectionMatrix();}
