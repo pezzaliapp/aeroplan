@@ -1190,7 +1190,11 @@ function parseED269(data){
   allZones=[];
   for(const f of arr){
     const props=f.properties||f;
-    const restriction=(props.restriction||props.restrictionType||props.type||'').toString();
+    // lettura robusta della restrizione: a livello properties O feature, con nomi alternativi e valori annidati
+    // ({code/value}). PRIMA i campi 'restriction' espliciti, poi 'type' come ultima spiaggia → PROHIBITED non sfugge.
+    let restriction=props.restriction||f.restriction||props.restrictionType||f.restrictionType||props.restrictionConditions||props.codeRestriction||props.type||f.type||'';
+    if(restriction&&typeof restriction==='object')restriction=restriction.code||restriction.value||restriction.restriction||restriction.type||restriction.name||'';
+    restriction=String(restriction).trim();
     const name=(props.name||props.identifier||f.identifier||f.name||'Zona UAS').toString();
     let geoms=f.geometry||props.geometry||f.geometries||[];
     if(geoms&&!Array.isArray(geoms))geoms=[geoms];
@@ -1245,12 +1249,25 @@ function selectNearby(){
   }
   // priorità al set di controllo (sicurezza), poi vicinanza; cap d'analisi per limitare i point-in-poly
   list.sort((a,b)=>{ if(a.ctrl!==b.ctrl)return a.ctrl?-1:1; return (a.ctrl?a.dH-b.dH:a.dT-b.dT); });
-  if(list.length>ZONE_CAP)list.length=ZONE_CAP;
-  let drawn=0;
-  dfZones=list.map(it=>{
+  // le VIETATE (no-fly) inquadrate hanno priorità ASSOLUTA: mai scartate da nessun cap (né d'analisi né di disegno)
+  const isProh=z=>restrInfo(z.restriction).word==='VIETATO';
+  if(list.length>ZONE_CAP){
+    const keep=[],extra=[];
+    for(const it of list){ (it.draw&&isProh(it.z)?keep:extra).push(it); }
+    list=keep.concat(extra).slice(0,Math.max(ZONE_CAP,keep.length));   // cap d'analisi alzato quanto basta a tenere TUTTE le VIETATE inquadrate
+    list.sort((a,b)=>{ if(a.ctrl!==b.ctrl)return a.ctrl?-1:1; return (a.ctrl?a.dH-b.dH:a.dT-b.dT); });
+  }
+  // _draw: 1) TUTTE le VIETATE inquadrate (cap alzato se serve, sono no-fly), 2) il resto fino a ZONE_DRAW_CAP per distanza
+  const drawIdx=new Set(); let nProh=0;
+  list.forEach((it,i)=>{ if(it.draw&&isProh(it.z)){drawIdx.add(i);nProh++;} });
+  const drawCap=Math.max(ZONE_DRAW_CAP,nProh);   // se le VIETATE nel raggio superano già il cap, lo alzo: non si tagliano
+  list.map((it,i)=>({i,dT:it.dT,draw:it.draw,proh:isProh(it.z)}))
+      .filter(o=>o.draw&&!o.proh).sort((a,b)=>a.dT-b.dT)            // posti restanti: inquadrate non-VIETATE (REQ_AUTHORISATION & co.) per distanza
+      .forEach(o=>{ if(drawIdx.size<drawCap)drawIdx.add(o.i); });
+  dfZones=list.map((it,i)=>{
     const z=it.z;
     const local=z.gpolys.map(poly=>({outer:poly.outer.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}),holes:poly.holes.map(h=>h.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}))}));
-    const _draw=it.draw && drawn<ZONE_DRAW_CAP; if(_draw)drawn++;       // solo le inquadrate (cap) vengono triangolate
+    const _draw=drawIdx.has(i);       // solo le inquadrate (cap) vengono triangolate; VIETATE sempre incluse
     return Object.assign({},z,{polys:local,_draw,_dT:it.dT});
   });
   buildZones(); checkZones(); renderWpList();
