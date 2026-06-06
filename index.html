@@ -1237,6 +1237,8 @@ function selectNearby(){
   let missionR=0; for(const w of waypoints){const d=Math.hypot(w.x,w.z); if(d>missionR)missionR=d;}
   const ctrlR=Math.max(missionR>0?missionR+2000:0,1500);
   dfBuiltRadius=ctrlR; lastSelDist=orbit.dist; lastSelTgt={x:orbit.tgt.x,z:orbit.tgt.z};
+  // le VIETATE (no-fly) sono fuori da OGNI cap di prossimità: il loro test bbox↔raggio gira su TUTTE, sempre
+  const isProh=z=>restrInfo(z.restriction).word==='VIETATO';
   const list=[];
   for(const z of allZones){
     // distanza bbox dalla Home (controllo) e dal target camera (disegno) — 0 se il punto è dentro la bbox
@@ -1245,19 +1247,18 @@ function selectNearby(){
     const clT=Math.max(z.bbox[0],Math.min(tgtGeo.lon,z.bbox[2])), caT=Math.max(z.bbox[1],Math.min(tgtGeo.lat,z.bbox[3]));
     const dT=Math.hypot((tgtGeo.lon-clT)*111320*cosT,(tgtGeo.lat-caT)*111320);
     const ctrl=dH<=ctrlR, draw=dT<=drawR;
-    if(ctrl||draw) list.push({z,dH,dT,ctrl,draw});
+    // VIETATE: SEMPRE in lista (no-fly, mai filtrate per prossimità a Home); le altre solo se vicine/inquadrate
+    if(ctrl||draw||isProh(z)) list.push({z,dH,dT,ctrl,draw});
   }
   // priorità al set di controllo (sicurezza), poi vicinanza; cap d'analisi per limitare i point-in-poly
   list.sort((a,b)=>{ if(a.ctrl!==b.ctrl)return a.ctrl?-1:1; return (a.ctrl?a.dH-b.dH:a.dT-b.dT); });
-  // le VIETATE (no-fly) inquadrate hanno priorità ASSOLUTA: mai scartate da nessun cap (né d'analisi né di disegno)
-  const isProh=z=>restrInfo(z.restriction).word==='VIETATO';
   if(list.length>ZONE_CAP){
     const keep=[],extra=[];
-    for(const it of list){ (it.draw&&isProh(it.z)?keep:extra).push(it); }
-    list=keep.concat(extra).slice(0,Math.max(ZONE_CAP,keep.length));   // cap d'analisi alzato quanto basta a tenere TUTTE le VIETATE inquadrate
+    for(const it of list){ (isProh(it.z)?keep:extra).push(it); }   // TUTTE le VIETATE protette dal cap d'analisi (mai scartate)
+    list=keep.concat(extra).slice(0,Math.max(ZONE_CAP,keep.length));
     list.sort((a,b)=>{ if(a.ctrl!==b.ctrl)return a.ctrl?-1:1; return (a.ctrl?a.dH-b.dH:a.dT-b.dT); });
   }
-  // _draw: 1) TUTTE le VIETATE inquadrate (cap alzato se serve, sono no-fly), 2) il resto fino a ZONE_DRAW_CAP per distanza
+  // _draw: 1) TUTTE le VIETATE che intersecano drawR (cap alzato se serve, sono no-fly), 2) il resto fino a ZONE_DRAW_CAP per distanza
   const drawIdx=new Set(); let nProh=0;
   list.forEach((it,i)=>{ if(it.draw&&isProh(it.z)){drawIdx.add(i);nProh++;} });
   const drawCap=Math.max(ZONE_DRAW_CAP,nProh);   // se le VIETATE nel raggio superano già il cap, lo alzo: non si tagliano
@@ -1266,8 +1267,10 @@ function selectNearby(){
       .forEach(o=>{ if(drawIdx.size<drawCap)drawIdx.add(o.i); });
   dfZones=list.map((it,i)=>{
     const z=it.z;
-    const local=z.gpolys.map(poly=>({outer:poly.outer.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}),holes:poly.holes.map(h=>h.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}))}));
-    const _draw=drawIdx.has(i);       // solo le inquadrate (cap) vengono triangolate; VIETATE sempre incluse
+    const _draw=drawIdx.has(i);       // solo le inquadrate (cap) vengono triangolate; VIETATE in drawR sempre incluse
+    // trasforma in coord locali solo se serve (disegno o controllo waypoint): le VIETATE lontane restano nel set con bbox ma non si triangolano
+    const need=_draw||it.ctrl;
+    const local=need?z.gpolys.map(poly=>({outer:poly.outer.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}),holes:poly.holes.map(h=>h.map(p=>{const l=fromGPS(p[1],p[0]);return{x:l.x,z:l.z};}))})):[];
     return Object.assign({},z,{polys:local,_draw,_dT:it.dT});
   });
   buildZones(); checkZones(); renderWpList();
